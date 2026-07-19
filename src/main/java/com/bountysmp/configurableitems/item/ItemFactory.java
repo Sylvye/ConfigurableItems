@@ -164,10 +164,17 @@ public final class ItemFactory {
     }
 
     private void applyDeathProtection(ItemStack stack, CustomItemDefinition definition) {
-        if (!definition.equip().enabled || definition.equip().deathEffects.isEmpty()) {
+        if (!definition.equip().deathProtection) {
             return;
         }
         List<ConsumeEffect> effects = consumeEffects(definition.equip().deathEffects);
+        if (effects.isEmpty()) {
+            effects = consumeEffects(List.of(
+                new CustomItemDefinition.EffectDef("minecraft:regeneration", 45, 1, 1.0f),
+                new CustomItemDefinition.EffectDef("minecraft:absorption", 5, 1, 1.0f),
+                new CustomItemDefinition.EffectDef("minecraft:fire_resistance", 40, 0, 1.0f)
+            ));
+        }
         if (!effects.isEmpty()) {
             stack.setData(DataComponentTypes.DEATH_PROTECTION, DeathProtection.deathProtection(effects));
         }

@@ -13,12 +13,17 @@ public final class TriggerContext {
     private final TriggerType type;
     private final String itemId;
     private final String itemName;
+    private final Player self;
+    private Entity target;
+    private Block block;
+    private Entity projectile;
     private final Map<String, String> variables = new LinkedHashMap<>();
 
     public TriggerContext(TriggerType type, String itemId, String itemName, Player self) {
         this.type = type;
         this.itemId = itemId;
         this.itemName = itemName;
+        this.self = self;
         put("SELF", self.getName());
         put("SELF_UUID", self.getUniqueId().toString());
         put("WORLD", self.getWorld().getName());
@@ -43,8 +48,25 @@ public final class TriggerContext {
         return variables;
     }
 
+    public Player self() {
+        return self;
+    }
+
+    public Entity target() {
+        return target;
+    }
+
+    public Block block() {
+        return block;
+    }
+
+    public Entity projectile() {
+        return projectile;
+    }
+
     public TriggerContext target(Entity entity) {
         if (entity != null) {
+            this.target = entity;
             put("TARGET", entity instanceof Player player ? player.getName() : entity.getType().key().asString());
             put("TARGET_UUID", entity.getUniqueId().toString());
             put("ENTITY", entity.getType().key().asString());
@@ -56,6 +78,7 @@ public final class TriggerContext {
 
     public TriggerContext block(Block block) {
         if (block != null) {
+            this.block = block;
             put("BLOCK", block.getType().key().asString());
             put("WORLD", block.getWorld().getName());
             putLocation(block.getLocation());
@@ -65,6 +88,7 @@ public final class TriggerContext {
 
     public TriggerContext projectile(Entity projectile) {
         if (projectile != null) {
+            this.projectile = projectile;
             put("PROJECTILE", projectile.getType().key().asString());
         }
         return this;

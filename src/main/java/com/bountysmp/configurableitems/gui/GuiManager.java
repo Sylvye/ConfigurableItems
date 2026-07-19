@@ -10,7 +10,7 @@ import com.bountysmp.configurableitems.util.ValidationUtil;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumSet;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -21,7 +21,9 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.Registry;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -85,7 +87,7 @@ public final class GuiManager implements Listener {
         Inventory inv = menu.inventory();
         frame(inv);
         inv.setItem(4, itemFactory.create(item));
-        button(menu, 10, Material.CYAN_DYE, NamedTextColor.AQUA, "Material", item.material().name(), e -> promptMaterial(player, item));
+        button(menu, 10, Material.CYAN_DYE, NamedTextColor.AQUA, "Material", item.material().name(), e -> openMaterialSelector(player, item, 0, ""));
         button(menu, 11, Material.NAME_TAG, NamedTextColor.AQUA, "Custom Name", item.customName(), e -> promptName(player, item));
         button(menu, 12, Material.WRITABLE_BOOK, NamedTextColor.AQUA, "Lore", item.lore().size() + " lines", e -> promptLore(player, item));
         button(menu, 13, Material.ENCHANTED_BOOK, NamedTextColor.LIGHT_PURPLE, "Enchantments", item.enchantments().size() + " entries", e -> openEnchantments(player, item));
@@ -94,15 +96,16 @@ public final class GuiManager implements Listener {
         button(menu, 16, Material.IRON_PICKAXE, NamedTextColor.LIGHT_PURPLE, "Tool", status(item.tool().enabled), e -> openTool(player, item));
         button(menu, 19, Material.ELYTRA, NamedTextColor.LIGHT_PURPLE, "Equip", status(item.equip().enabled), e -> openEquip(player, item));
         button(menu, 20, Material.CHEST, NamedTextColor.LIGHT_PURPLE, "Extras", "Durability, stack, model, cooldown", e -> openExtras(player, item));
-        button(menu, 21, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Triggers", triggerCount(item) + " commands", e -> openTriggers(player, item));
-        button(menu, 23, Material.PLAYER_HEAD, NamedTextColor.GREEN, "Give To Self", "", e -> player.getInventory().addItem(itemFactory.create(item)));
-        button(menu, 24, Material.LIME_DYE, NamedTextColor.GREEN, "Save", "Write YAML and update cache", e -> save(player, item));
-        button(menu, 25, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openMain(player, 0));
-        button(menu, 40, Material.RED_DYE, NamedTextColor.RED, "Delete", "Deletes saved YAML", e -> {
+        button(menu, 21, Material.BARRIER, NamedTextColor.YELLOW, "Restrictions", restrictionCount(item) + " enabled", e -> openRestrictions(player, item));
+        button(menu, 22, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Triggers", triggerCount(item) + " commands", e -> openTriggers(player, item));
+        button(menu, 45, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openMain(player, 0));
+        button(menu, 46, Material.RED_DYE, NamedTextColor.RED, "Delete YAML", "Deletes saved YAML", e -> {
             repository.delete(item.id());
             drafts.remove(player.getUniqueId());
             openMain(player, 0);
         });
+        button(menu, 49, Material.PLAYER_HEAD, NamedTextColor.GREEN, "Give To Self", "", e -> player.getInventory().addItem(itemFactory.create(item)));
+        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, "Save", "Write YAML and update cache", e -> save(player, item));
         player.openInventory(inv);
     }
 
@@ -110,15 +113,7 @@ public final class GuiManager implements Listener {
         Menu menu = new Menu("CI Enchants");
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Enchantment", "<id> <level>", e -> input(player, "Enter enchantment and level, e.g. sharpness 5", raw -> {
-            String[] parts = raw.split("\\s+");
-            if (parts.length < 2 || ValidationUtil.enchantment(parts[0]).isEmpty()) {
-                error(player, "Invalid enchantment.");
-            } else {
-                item.enchantments().add(new CustomItemDefinition.EnchantDef(ValidationUtil.enchantment(parts[0]).get().key(), parseInt(parts[1], 1)));
-            }
-            openEnchantments(player, item);
-        }));
+        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Enchantment", "Choose from registry", e -> openEnchantmentSelector(player, item, 0, ""));
         button(menu, 11, Material.BOOK, item.showEnchantments() ? NamedTextColor.GREEN : NamedTextColor.RED, "Tooltip", shown(item.showEnchantments()), e -> {
             item.showEnchantments(!item.showEnchantments());
             openEnchantments(player, item);
@@ -143,20 +138,7 @@ public final class GuiManager implements Listener {
         Menu menu = new Menu("CI Attributes");
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Attribute", "<id> <operation> <value> <slot>", e -> input(player, "Example: attack_damage ADD_NUMBER 4 HAND", raw -> {
-            String[] p = raw.split("\\s+");
-            if (p.length < 4 || ValidationUtil.attribute(p[0]).isEmpty()) {
-                error(player, "Invalid attribute.");
-            } else {
-                try {
-                    AttributeModifier.Operation op = AttributeModifier.Operation.valueOf(p[1].toUpperCase(Locale.ROOT));
-                    item.attributes().add(new CustomItemDefinition.AttributeDef(ValidationUtil.attribute(p[0]).get().key(), op, Double.parseDouble(p[2]), ValidationUtil.slotGroup(p[3])));
-                } catch (Exception ex) {
-                    error(player, "Invalid operation or value.");
-                }
-            }
-            openAttributes(player, item);
-        }));
+        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Attribute", "Choose from registry", e -> openAttributeSelector(player, item, 0, ""));
         button(menu, 11, Material.BOOK, item.showAttributes() ? NamedTextColor.GREEN : NamedTextColor.RED, "Tooltip", shown(item.showAttributes()), e -> {
             item.showAttributes(!item.showAttributes());
             openAttributes(player, item);
@@ -198,7 +180,7 @@ public final class GuiManager implements Listener {
             item.food().animation = next(item.food().animation, "EAT", "DRINK", "BLOCK", "BOW", "SPEAR", "CROSSBOW", "SPYGLASS", "HORN", "BRUSH");
             openFood(player, item);
         });
-        button(menu, 16, Material.POTION, NamedTextColor.GREEN, "Add Effect", "<effect> <seconds> <amplifier> [chance]", e -> promptEffect(player, item, item.food().consumedEffects, () -> openFood(player, item)));
+        button(menu, 16, Material.POTION, NamedTextColor.GREEN, "Add Effect", "Choose potion effect", e -> openPotionEffectSelector(player, item, item.food().consumedEffects, () -> openFood(player, item), 0, ""));
         listEffects(menu, item.food().consumedEffects, () -> openFood(player, item));
         back(menu, player, item);
         player.openInventory(inv);
@@ -228,26 +210,20 @@ public final class GuiManager implements Listener {
             item.equip().enabled = !item.equip().enabled;
             openEquip(player, item);
         });
-        button(menu, 11, Material.ARMOR_STAND, NamedTextColor.AQUA, "Slot", item.equip().slot.name(), e -> {
-            item.equip().slot = nextSlot(item.equip().slot);
-            openEquip(player, item);
-        });
+        button(menu, 11, Material.ARMOR_STAND, NamedTextColor.AQUA, "Slot", item.equip().slot.name(), e -> openEquipmentSlotSelector(player, item, 0, ""));
         button(menu, 12, Material.ELYTRA, item.equip().glider ? NamedTextColor.GREEN : NamedTextColor.RED, "Glider", status(item.equip().glider), e -> {
             item.equip().glider = !item.equip().glider;
             openEquip(player, item);
         });
-        button(menu, 13, Material.NOTE_BLOCK, NamedTextColor.AQUA, "Equip Sound", item.equip().equipSound, e -> input(player, "Enter sound id, e.g. minecraft:item.armor.equip_generic", raw -> {
-            if (ValidationUtil.sound(raw).isPresent()) {
-                item.equip().equipSound = ValidationUtil.sound(raw).get().key();
-            } else {
-                error(player, "Unknown sound.");
-            }
-            openEquip(player, item);
-        }));
+        button(menu, 13, Material.NOTE_BLOCK, NamedTextColor.AQUA, "Equip Sound", item.equip().equipSound, e -> openSoundSelector(player, item, 0, ""));
         button(menu, 14, Material.DISPENSER, item.equip().dispensable ? NamedTextColor.GREEN : NamedTextColor.RED, "Dispensable", status(item.equip().dispensable), e -> toggleEquip(player, item, "dispensable"));
         button(menu, 15, Material.LEVER, item.equip().swappable ? NamedTextColor.GREEN : NamedTextColor.RED, "Swappable", status(item.equip().swappable), e -> toggleEquip(player, item, "swappable"));
         button(menu, 16, Material.SHIELD, item.equip().damageOnHurt ? NamedTextColor.GREEN : NamedTextColor.RED, "Damage On Hurt", status(item.equip().damageOnHurt), e -> toggleEquip(player, item, "damage"));
-        button(menu, 22, Material.TOTEM_OF_UNDYING, NamedTextColor.GREEN, "Add Death Effect", "<effect> <seconds> <amplifier> [chance]", e -> promptEffect(player, item, item.equip().deathEffects, () -> openEquip(player, item)));
+        button(menu, 21, Material.TOTEM_OF_UNDYING, item.equip().deathProtection ? NamedTextColor.GREEN : NamedTextColor.RED, "Death Protection", status(item.equip().deathProtection), e -> {
+            item.equip().deathProtection = !item.equip().deathProtection;
+            openEquip(player, item);
+        });
+        button(menu, 22, Material.POTION, NamedTextColor.GREEN, "Add Death Effect", "Choose potion effect", e -> openPotionEffectSelector(player, item, item.equip().deathEffects, () -> openEquip(player, item), 0, ""));
         listEffects(menu, item.equip().deathEffects, () -> openEquip(player, item));
         back(menu, player, item);
         player.openInventory(inv);
@@ -281,22 +257,45 @@ public final class GuiManager implements Listener {
             }
             openExtras(player, item);
         });
-        materialText(menu, player, item, 16, Material.IRON_INGOT, "Repair Item", item.extras().repairItem, raw -> item.extras().repairItem = raw);
-        materialText(menu, player, item, 21, Material.GLASS_BOTTLE, "Use Remainder", item.extras().useRemainder, raw -> item.extras().useRemainder = raw);
+        button(menu, 16, Material.IRON_INGOT, NamedTextColor.AQUA, "Repair Item", String.valueOf(item.extras().repairItem), e -> openRepairItemSelector(player, item, 0, ""));
+        button(menu, 21, Material.GLASS_BOTTLE, NamedTextColor.AQUA, "Use Remainder", String.valueOf(item.extras().useRemainder), e -> openUseRemainderSelector(player, item, 0, ""));
         button(menu, 22, Material.CLOCK, NamedTextColor.AQUA, "Use Cooldown", String.valueOf(item.extras().useCooldownSeconds), e -> input(player, "Enter cooldown seconds, or clear", raw -> {
             item.extras().useCooldownSeconds = raw.equalsIgnoreCase("clear") ? null : parseFloat(raw, item.extras().useCooldownSeconds == null ? 0f : item.extras().useCooldownSeconds);
             openExtras(player, item);
         }));
-        button(menu, 23, Material.ITEM_FRAME, NamedTextColor.AQUA, "Item Model", String.valueOf(item.extras().itemModel), e -> input(player, "Enter item model id, or clear", raw -> {
-            if (raw.equalsIgnoreCase("clear")) {
-                item.extras().itemModel = null;
-            } else if (ValidationUtil.key(raw, plugin).isPresent()) {
-                item.extras().itemModel = ValidationUtil.normalizeKey(raw);
-            } else {
-                error(player, "Invalid namespaced key.");
-            }
-            openExtras(player, item);
-        }));
+        button(menu, 23, Material.ITEM_FRAME, NamedTextColor.AQUA, "Item Model", String.valueOf(item.extras().itemModel), e -> openItemModelSelector(player, item, 0, ""));
+        back(menu, player, item);
+        player.openInventory(inv);
+    }
+
+    private void openRestrictions(Player player, CustomItemDefinition item) {
+        Menu menu = new Menu("CI Restrictions");
+        Inventory inv = menu.inventory();
+        frame(inv);
+        button(menu, 10, Material.DROPPER, restrictionColor(item.restrictions().cancelDrop), "Cancel Item Drop", status(item.restrictions().cancelDrop), e -> {
+            item.restrictions().cancelDrop = !item.restrictions().cancelDrop;
+            openRestrictions(player, item);
+        });
+        button(menu, 11, Material.GRASS_BLOCK, restrictionColor(item.restrictions().cancelPlacement), "Cancel Item Placement", status(item.restrictions().cancelPlacement), e -> {
+            item.restrictions().cancelPlacement = !item.restrictions().cancelPlacement;
+            openRestrictions(player, item);
+        });
+        button(menu, 12, Material.IRON_AXE, restrictionColor(item.restrictions().cancelToolInteractions), "Cancel Tool Interactions", status(item.restrictions().cancelToolInteractions), e -> {
+            item.restrictions().cancelToolInteractions = !item.restrictions().cancelToolInteractions;
+            openRestrictions(player, item);
+        });
+        button(menu, 13, Material.COOKED_BEEF, restrictionColor(item.restrictions().cancelConsumption), "Cancel Consumption", status(item.restrictions().cancelConsumption), e -> {
+            item.restrictions().cancelConsumption = !item.restrictions().cancelConsumption;
+            openRestrictions(player, item);
+        });
+        button(menu, 14, Material.CRAFTING_TABLE, restrictionColor(item.restrictions().cancelCraft), "Cancel Craft", status(item.restrictions().cancelCraft), e -> {
+            item.restrictions().cancelCraft = !item.restrictions().cancelCraft;
+            openRestrictions(player, item);
+        });
+        button(menu, 15, Material.ANVIL, restrictionColor(item.restrictions().cancelEnchantAnvil), "Cancel Enchant / Anvil", status(item.restrictions().cancelEnchantAnvil), e -> {
+            item.restrictions().cancelEnchantAnvil = !item.restrictions().cancelEnchantAnvil;
+            openRestrictions(player, item);
+        });
         back(menu, player, item);
         player.openInventory(inv);
     }
@@ -330,6 +329,7 @@ public final class GuiManager implements Listener {
             openTriggerCommands(player, item, type);
         }));
         button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", String.join(", ", TriggerExecutor.allowedVariables(type)));
+        button(menu, 12, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Add Action", "Choose a CI action template", e -> openActionTemplateSelector(player, item, type, 0, ""));
         int slot = 19;
         List<String> commands = item.commands(type);
         for (int i = 0; i < commands.size() && slot < 44; i++) {
@@ -341,6 +341,332 @@ public final class GuiManager implements Listener {
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openTriggers(player, item));
         player.openInventory(inv);
+    }
+
+    private void openActionTemplateSelector(Player player, CustomItemDefinition item, TriggerType type, int page, String filter) {
+        openSelector(player, item, "Select Action", actionTemplateOptions(), page, filter,
+            option -> {
+                for (String line : option.key().split("\\n")) {
+                    if (!line.isBlank()) {
+                        item.commands(type).add(line);
+                    }
+                }
+                openTriggerCommands(player, item, type);
+            },
+            () -> openTriggerCommands(player, item, type),
+            null,
+            () -> input(player, "Enter custom CI action", raw -> {
+                item.commands(type).add(raw);
+                openTriggerCommands(player, item, type);
+            })
+        );
+    }
+
+    private void openMaterialSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Material", materialOptions(), page, filter,
+            option -> {
+                ValidationUtil.material(option.key()).ifPresent(item::material);
+                openEditor(player, item);
+            },
+            () -> openEditor(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openEnchantmentSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Enchant", enchantmentOptions(), page, filter,
+            option -> input(player, "Enter level for " + option.key(), raw -> {
+                item.enchantments().add(new CustomItemDefinition.EnchantDef(option.key(), parseInt(raw, 1)));
+                openEnchantments(player, item);
+            }),
+            () -> openEnchantments(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openAttributeSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Attribute", attributeOptions(), page, filter,
+            option -> openAttributeOperationSelector(player, item, option.key()),
+            () -> openAttributes(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openAttributeOperationSelector(Player player, CustomItemDefinition item, String attributeKey) {
+        List<SelectorOption> options = Arrays.stream(AttributeModifier.Operation.values())
+            .map(operation -> new SelectorOption(operation.name(), Material.COMPARATOR, operation.name(), ""))
+            .toList();
+        openSelector(player, item, "Attribute Operation", options, 0, "",
+            option -> input(player, "Enter value for " + attributeKey, raw -> openAttributeSlotGroupSelector(player, item, attributeKey, AttributeModifier.Operation.valueOf(option.key()), parseFloat(raw, 0.0f))),
+            () -> openAttributes(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openAttributeSlotGroupSelector(Player player, CustomItemDefinition item, String attributeKey, AttributeModifier.Operation operation, double value) {
+        openSelector(player, item, "Attribute Slot", slotGroupOptions(), 0, "",
+            option -> {
+                item.attributes().add(new CustomItemDefinition.AttributeDef(attributeKey, operation, value, ValidationUtil.slotGroup(option.key())));
+                openAttributes(player, item);
+            },
+            () -> openAttributes(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openPotionEffectSelector(Player player, CustomItemDefinition item, List<CustomItemDefinition.EffectDef> effects, Runnable reopen, int page, String filter) {
+        openSelector(player, item, "Select Effect", potionOptions(), page, filter,
+            option -> input(player, "Enter seconds amplifier chance for " + option.key() + ", e.g. 10 1 1.0", raw -> {
+                String[] p = raw.split("\\s+");
+                effects.add(new CustomItemDefinition.EffectDef(
+                    option.key(),
+                    p.length > 0 ? parseInt(p[0], 5) : 5,
+                    p.length > 1 ? parseInt(p[1], 0) : 0,
+                    p.length > 2 ? parseFloat(p[2], 1.0f) : 1.0f
+                ));
+                reopen.run();
+            }),
+            reopen,
+            null,
+            null
+        );
+    }
+
+    private void openSoundSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Sound", soundOptions(), page, filter,
+            option -> {
+                item.equip().equipSound = option.key();
+                openEquip(player, item);
+            },
+            () -> openEquip(player, item),
+            null,
+            () -> input(player, "Enter custom sound id", raw -> {
+                if (ValidationUtil.sound(raw).isPresent()) {
+                    item.equip().equipSound = ValidationUtil.sound(raw).get().key();
+                } else {
+                    error(player, "Unknown sound.");
+                }
+                openEquip(player, item);
+            })
+        );
+    }
+
+    private void openEquipmentSlotSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Equip Slot", equipmentSlotOptions(), page, filter,
+            option -> {
+                item.equip().slot = ValidationUtil.equipmentSlot(option.key());
+                openEquip(player, item);
+            },
+            () -> openEquip(player, item),
+            null,
+            null
+        );
+    }
+
+    private void openRepairItemSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Repair Item", materialOptions(), page, filter,
+            option -> {
+                item.extras().repairItem = option.key();
+                openExtras(player, item);
+            },
+            () -> openExtras(player, item),
+            () -> {
+                item.extras().repairItem = null;
+                openExtras(player, item);
+            },
+            null
+        );
+    }
+
+    private void openUseRemainderSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Remainder", materialOptions(), page, filter,
+            option -> {
+                item.extras().useRemainder = option.key();
+                openExtras(player, item);
+            },
+            () -> openExtras(player, item),
+            () -> {
+                item.extras().useRemainder = null;
+                openExtras(player, item);
+            },
+            null
+        );
+    }
+
+    private void openItemModelSelector(Player player, CustomItemDefinition item, int page, String filter) {
+        openSelector(player, item, "Select Item Model", materialModelOptions(), page, filter,
+            option -> {
+                item.extras().itemModel = option.key();
+                openExtras(player, item);
+            },
+            () -> openExtras(player, item),
+            () -> {
+                item.extras().itemModel = null;
+                openExtras(player, item);
+            },
+            () -> input(player, "Enter custom item model id, or clear", raw -> {
+                if (raw.equalsIgnoreCase("clear")) {
+                    item.extras().itemModel = null;
+                } else if (ValidationUtil.key(raw, plugin).isPresent()) {
+                    item.extras().itemModel = ValidationUtil.normalizeKey(raw);
+                } else {
+                    error(player, "Invalid namespaced key.");
+                }
+                openExtras(player, item);
+            })
+        );
+    }
+
+    private void openSelector(Player player, CustomItemDefinition item, String title, List<SelectorOption> options, int page, String filter, Consumer<SelectorOption> select, Runnable back, Runnable clear, Runnable custom) {
+        Menu menu = new Menu(title);
+        Inventory inv = menu.inventory();
+        frame(inv);
+        String normalizedFilter = filter == null ? "" : filter.toLowerCase(Locale.ROOT);
+        List<SelectorOption> filtered = options.stream()
+            .filter(option -> normalizedFilter.isBlank() || option.key().toLowerCase(Locale.ROOT).contains(normalizedFilter) || option.name().toLowerCase(Locale.ROOT).contains(normalizedFilter))
+            .toList();
+        int pageSize = 28;
+        int safePage = Math.max(0, Math.min(page, Math.max(0, (filtered.size() - 1) / pageSize)));
+        int start = safePage * pageSize;
+        int slot = 10;
+        for (int i = start; i < filtered.size() && i < start + pageSize; i++) {
+            if (slot % 9 == 8) {
+                slot += 2;
+            }
+            SelectorOption option = filtered.get(i);
+            button(menu, slot++, option.icon(), NamedTextColor.AQUA, option.name(), option.key() + (option.lore().isBlank() ? "" : " | " + option.lore()), e -> select.accept(option));
+        }
+        if (safePage > 0) {
+            button(menu, 45, Material.ARROW, NamedTextColor.GRAY, "Previous", "", e -> openSelector(player, item, title, options, safePage - 1, normalizedFilter, select, back, clear, custom));
+        }
+        button(menu, 46, Material.COMPASS, NamedTextColor.AQUA, "Search", normalizedFilter.isBlank() ? "No filter" : normalizedFilter, e -> input(player, "Enter search filter, or clear", raw -> openSelector(player, item, title, options, 0, raw.equalsIgnoreCase("clear") ? "" : raw, select, back, clear, custom)));
+        if (clear != null) {
+            button(menu, 47, Material.BARRIER, NamedTextColor.RED, "Clear", "", e -> clear.run());
+        }
+        if (custom != null) {
+            button(menu, 48, Material.NAME_TAG, NamedTextColor.YELLOW, "Custom Key", "", e -> custom.run());
+        }
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> back.run());
+        if (start + pageSize < filtered.size()) {
+            button(menu, 53, Material.ARROW, NamedTextColor.GRAY, "Next", "", e -> openSelector(player, item, title, options, safePage + 1, normalizedFilter, select, back, clear, custom));
+        }
+        player.openInventory(inv);
+    }
+
+    private List<SelectorOption> materialOptions() {
+        return Arrays.stream(Material.values())
+            .filter(material -> material.isItem() && !material.isAir())
+            .sorted(Comparator.comparing(material -> material.getKey().toString()))
+            .map(material -> new SelectorOption(material.getKey().toString(), material, material.name(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> actionTemplateOptions() {
+        return List.of(
+            new SelectorOption("DELAY_TICK 20", Material.CLOCK, "DELAY_TICK", "Flow"),
+            new SelectorOption("IF 1=1 SEND_MESSAGE &aCondition passed", Material.COMPARATOR, "IF", "Flow"),
+            new SelectorOption("LOOP_START 3 20\nSEND_MESSAGE &eLoop tick\nLOOP_END", Material.REPEATER, "LOOP_START / LOOP_END", "Flow"),
+            new SelectorOption("RANDOM_RUN selectionCount:1\nSEND_MESSAGE &aOption one\nSEND_MESSAGE &bOption two\nRANDOM_END", Material.DROPPER, "RANDOM_RUN / RANDOM_END", "Flow"),
+            new SelectorOption("FOR [one,two,three] > for1\nSEND_MESSAGE &e{for1}\nEND_FOR for1", Material.HOPPER, "FOR / END_FOR", "Flow"),
+            new SelectorOption("AROUND 10 SEND_MESSAGE &eNearby player", Material.PLAYER_HEAD, "AROUND", "Selectors"),
+            new SelectorOption("MOB_AROUND 10 DAMAGE 2", Material.ZOMBIE_HEAD, "MOB_AROUND", "Selectors"),
+            new SelectorOption("NEAREST 10 SEND_MESSAGE &eNearest player", Material.COMPASS, "NEAREST", "Selectors"),
+            new SelectorOption("MOB_NEAREST 10 BURN 3", Material.ROTTEN_FLESH, "MOB_NEAREST", "Selectors"),
+            new SelectorOption("HITSCAN 32 DAMAGE 5", Material.SPYGLASS, "HITSCAN", "Selectors"),
+            new SelectorOption("DAMAGE 5", Material.IRON_SWORD, "DAMAGE", "Entity"),
+            new SelectorOption("HEAL 5", Material.GOLDEN_APPLE, "HEAL", "Entity"),
+            new SelectorOption("SET_HEALTH 10", Material.RED_DYE, "SET_HEALTH", "Entity"),
+            new SelectorOption("KILL", Material.WITHER_SKELETON_SKULL, "KILL", "Entity"),
+            new SelectorOption("BURN 5", Material.FLINT_AND_STEEL, "BURN", "Entity"),
+            new SelectorOption("INVULNERABILITY 40", Material.SHIELD, "INVULNERABILITY", "Entity"),
+            new SelectorOption("TELEPORT {X} {Y} {Z}", Material.ENDER_PEARL, "TELEPORT", "Entity"),
+            new SelectorOption("VELOCITY 0 1 0", Material.SLIME_BALL, "VELOCITY", "Entity"),
+            new SelectorOption("DASH 1.5", Material.FEATHER, "DASH", "Entity"),
+            new SelectorOption("SEND_MESSAGE &aHello", Material.PAPER, "SEND_MESSAGE", "Message"),
+            new SelectorOption("ACTIONBAR &eReady", Material.OAK_SIGN, "ACTIONBAR", "Message"),
+            new SelectorOption("PARTICLE FLAME 20 0.2 0.01", Material.BLAZE_POWDER, "PARTICLE", "Visual"),
+            new SelectorOption("SET_BLOCK STONE", Material.STONE, "SET_BLOCK", "Block"),
+            new SelectorOption("SET_TEMP_BLOCK GLOWSTONE 100", Material.GLOWSTONE, "SET_TEMP_BLOCK", "Block"),
+            new SelectorOption("BREAK_BLOCK drop:true", Material.IRON_PICKAXE, "BREAK_BLOCK", "Block"),
+            new SelectorOption("DROPITEM DIAMOND 1", Material.DIAMOND, "DROPITEM", "Item"),
+            new SelectorOption("VEINMINE 64 drop:true", Material.DIAMOND_PICKAXE, "VEINMINE", "Block")
+        );
+    }
+
+    private List<SelectorOption> materialModelOptions() {
+        return Arrays.stream(Material.values())
+            .filter(material -> material.isItem() && !material.isAir())
+            .sorted(Comparator.comparing(material -> material.getKey().toString()))
+            .map(material -> new SelectorOption(material.getKey().toString(), material, material.name(), "Vanilla model key"))
+            .toList();
+    }
+
+    private List<SelectorOption> enchantmentOptions() {
+        return Registry.ENCHANTMENT.stream()
+            .sorted(Comparator.comparing(enchantment -> enchantment.getKey().toString()))
+            .map(enchantment -> new SelectorOption(enchantment.getKey().toString(), Material.ENCHANTED_BOOK, enchantment.getKey().getKey(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> attributeOptions() {
+        return Registry.ATTRIBUTE.stream()
+            .sorted(Comparator.comparing(attribute -> attribute.getKey().toString()))
+            .map(attribute -> new SelectorOption(attribute.getKey().toString(), Material.IRON_SWORD, attribute.getKey().getKey(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> potionOptions() {
+        return Registry.MOB_EFFECT.stream()
+            .sorted(Comparator.comparing(effect -> effect.getKey().toString()))
+            .map(effect -> new SelectorOption(effect.getKey().toString(), Material.POTION, effect.getKey().getKey(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> soundOptions() {
+        return Registry.SOUNDS.stream()
+            .sorted(Comparator.comparing(sound -> sound.getKey().toString()))
+            .map(sound -> new SelectorOption(sound.getKey().toString(), Material.NOTE_BLOCK, sound.getKey().getKey(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> equipmentSlotOptions() {
+        return Arrays.stream(EquipmentSlot.values())
+            .map(slot -> new SelectorOption(slot.name(), slotIcon(slot), slot.name(), ""))
+            .toList();
+    }
+
+    private List<SelectorOption> slotGroupOptions() {
+        return List.of(
+            new SelectorOption("ANY", Material.COMPASS, "ANY", ""),
+            new SelectorOption("MAINHAND", Material.IRON_SWORD, "MAINHAND", ""),
+            new SelectorOption("OFFHAND", Material.SHIELD, "OFFHAND", ""),
+            new SelectorOption("HAND", Material.STICK, "HAND", ""),
+            new SelectorOption("HEAD", Material.IRON_HELMET, "HEAD", ""),
+            new SelectorOption("CHEST", Material.IRON_CHESTPLATE, "CHEST", ""),
+            new SelectorOption("LEGS", Material.IRON_LEGGINGS, "LEGS", ""),
+            new SelectorOption("FEET", Material.IRON_BOOTS, "FEET", ""),
+            new SelectorOption("ARMOR", Material.ARMOR_STAND, "ARMOR", ""),
+            new SelectorOption("BODY", Material.ELYTRA, "BODY", ""),
+            new SelectorOption("SADDLE", Material.SADDLE, "SADDLE", "")
+        );
+    }
+
+    private Material slotIcon(EquipmentSlot slot) {
+        return switch (slot) {
+            case HEAD -> Material.IRON_HELMET;
+            case CHEST -> Material.IRON_CHESTPLATE;
+            case LEGS -> Material.IRON_LEGGINGS;
+            case FEET -> Material.IRON_BOOTS;
+            case HAND -> Material.IRON_SWORD;
+            case OFF_HAND -> Material.SHIELD;
+            case BODY -> Material.ELYTRA;
+            case SADDLE -> Material.SADDLE;
+        };
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -361,7 +687,7 @@ public final class GuiManager implements Listener {
         input(player, "Enter new item id, e.g. flame_sword", raw -> {
             String id = raw.toLowerCase(Locale.ROOT);
             if (!ValidationUtil.validItemId(id)) {
-                error(player, "Invalid id. Use lowercase letters, numbers, _, -, or /.");
+                error(player, "Invalid id. Use lowercase letters, numbers, _, or -.");
                 openMain(player, 0);
                 return;
             }
@@ -494,12 +820,28 @@ public final class GuiManager implements Listener {
         return item.triggers().values().stream().mapToInt(List::size).sum();
     }
 
+    private int restrictionCount(CustomItemDefinition item) {
+        CustomItemDefinition.RestrictionsDef restrictions = item.restrictions();
+        int count = 0;
+        if (restrictions.cancelDrop) count++;
+        if (restrictions.cancelPlacement) count++;
+        if (restrictions.cancelToolInteractions) count++;
+        if (restrictions.cancelConsumption) count++;
+        if (restrictions.cancelCraft) count++;
+        if (restrictions.cancelEnchantAnvil) count++;
+        return count;
+    }
+
     private static String status(boolean enabled) {
         return enabled ? "Enabled" : "Disabled";
     }
 
     private static String shown(boolean shown) {
         return shown ? "Shown" : "Hidden";
+    }
+
+    private static NamedTextColor restrictionColor(boolean enabled) {
+        return enabled ? NamedTextColor.GREEN : NamedTextColor.RED;
     }
 
     private void toggleFood(Player player, CustomItemDefinition item) {
@@ -572,5 +914,8 @@ public final class GuiManager implements Listener {
         void action(int slot, Consumer<InventoryClickEvent> action) {
             actions.put(slot, action);
         }
+    }
+
+    private record SelectorOption(String key, Material icon, String name, String lore) {
     }
 }

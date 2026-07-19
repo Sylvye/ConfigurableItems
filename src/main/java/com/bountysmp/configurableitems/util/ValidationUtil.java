@@ -43,7 +43,11 @@ public final class ValidationUtil {
         if (raw == null || raw.isBlank()) {
             return Optional.empty();
         }
-        Material material = Material.matchMaterial(raw);
+        String value = raw.trim();
+        if (value.toLowerCase(Locale.ROOT).startsWith("minecraft:")) {
+            value = value.substring("minecraft:".length());
+        }
+        Material material = Material.matchMaterial(value);
         return material == null || material.isAir() ? Optional.empty() : Optional.of(material);
     }
 

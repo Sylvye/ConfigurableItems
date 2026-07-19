@@ -1,8 +1,10 @@
 package com.bountysmp.configurableitems.trigger;
 
+import com.bountysmp.configurableitems.action.ActionEngine;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
 import com.bountysmp.configurableitems.storage.ItemRepository;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -22,10 +24,12 @@ public final class TriggerExecutor {
 
     private final Plugin plugin;
     private final ItemRepository repository;
+    private final ActionEngine actionEngine;
 
-    public TriggerExecutor(Plugin plugin, ItemRepository repository) {
+    public TriggerExecutor(Plugin plugin, ItemRepository repository, ActionEngine actionEngine) {
         this.plugin = plugin;
         this.repository = repository;
+        this.actionEngine = actionEngine;
     }
 
     public void fire(TriggerContext context) {
@@ -37,14 +41,16 @@ public final class TriggerExecutor {
         if (commands == null || commands.isEmpty()) {
             return;
         }
+        List<String> renderedCommands = new ArrayList<>();
         for (String command : commands) {
             Optional<String> rendered = render(command, context);
             if (rendered.isEmpty()) {
                 plugin.getLogger().warning("Skipped " + context.type() + " command for " + context.itemId() + " because a variable was missing: " + command);
                 continue;
             }
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), rendered.get());
+            renderedCommands.add(rendered.get());
         }
+        actionEngine.execute(context, renderedCommands);
     }
 
     public static Set<String> allowedVariables(TriggerType type) {
@@ -65,7 +71,11 @@ public final class TriggerExecutor {
         Set<String> allowed = allowedVariables(type);
         Matcher matcher = VARIABLE.matcher(command);
         while (matcher.find()) {
-            String variable = matcher.group(1).toUpperCase(Locale.ROOT);
+            String rawVariable = matcher.group(1);
+            String variable = rawVariable.toUpperCase(Locale.ROOT);
+            if (!rawVariable.equals(variable)) {
+                continue;
+            }
             if (!allowed.contains(variable)) {
                 return Optional.of(variable);
             }
@@ -80,7 +90,8 @@ public final class TriggerExecutor {
             String variable = matcher.group(1).toUpperCase(Locale.ROOT);
             String value = context.variables().get(variable);
             if (value == null) {
-                return Optional.empty();
+                matcher.appendReplacement(output, Matcher.quoteReplacement("{" + matcher.group(1) + "}"));
+                continue;
             }
             matcher.appendReplacement(output, Matcher.quoteReplacement(value));
         }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -18,7 +19,7 @@ public final class TextUtil {
     }
 
     public static Component legacy(String input) {
-        return LEGACY.deserialize(input == null || input.isBlank() ? "" : input);
+        return nonItalic(LEGACY.deserialize(input == null || input.isBlank() ? "" : input));
     }
 
     public static List<Component> legacyLines(List<String> input) {
@@ -36,8 +37,8 @@ public final class TextUtil {
     public static ItemStack button(Material material, Component name, List<Component> lore) {
         ItemStack stack = new ItemStack(material);
         stack.editMeta(meta -> {
-            meta.displayName(name);
-            meta.lore(lore);
+            meta.displayName(nonItalic(name));
+            meta.lore(lore.stream().map(TextUtil::nonItalic).toList());
             meta.addItemFlags(ItemFlag.values());
         });
         return stack;
@@ -46,14 +47,18 @@ public final class TextUtil {
     public static ItemStack button(Material material, NamedTextColor color, String name, String... lore) {
         List<Component> lines = new ArrayList<>();
         for (String line : lore) {
-            lines.add(Component.text(line, NamedTextColor.GRAY));
+            lines.add(nonItalic(Component.text(line, NamedTextColor.GRAY)));
         }
-        return button(material, Component.text(name, color), lines);
+        return button(material, nonItalic(Component.text(name, color)), lines);
     }
 
     public static void name(ItemStack stack, NamedTextColor color, String name) {
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text(name, color));
+        meta.displayName(nonItalic(Component.text(name, color)));
         stack.setItemMeta(meta);
+    }
+
+    public static Component nonItalic(Component component) {
+        return component.decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
     }
 }

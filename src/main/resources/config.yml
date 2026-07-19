@@ -1,0 +1,9 @@
+actions:
+  warnings:
+    warn-radius: 32
+    warn-selected-entities: 50
+    warn-loop-iterations: 100
+    warn-for-iterations: 200
+    warn-veinmine-blocks: 128
+    warn-hitscan-distance: 128
+    warn-delayed-queues: 500

@@ -106,6 +106,7 @@ public final class ItemRepository {
         readTool(yaml.getConfigurationSection("tool"), item.tool());
         readEquip(yaml.getConfigurationSection("equip"), item.equip());
         readExtras(yaml.getConfigurationSection("extras"), item.extras());
+        readRestrictions(yaml.getConfigurationSection("restrictions"), item.restrictions());
         readTriggers(yaml.getConfigurationSection("triggers"), item.triggers());
         return item;
     }
@@ -140,6 +141,7 @@ public final class ItemRepository {
         writeTool(yaml.createSection("tool"), item.tool());
         writeEquip(yaml.createSection("equip"), item.equip());
         writeExtras(yaml.createSection("extras"), item.extras());
+        writeRestrictions(yaml.createSection("restrictions"), item.restrictions());
 
         ConfigurationSection triggerSection = yaml.createSection("triggers");
         item.triggers().forEach((type, commands) -> {
@@ -222,6 +224,7 @@ public final class ItemRepository {
         equip.dispensable = section.getBoolean("dispensable", true);
         equip.swappable = section.getBoolean("swappable", true);
         equip.damageOnHurt = section.getBoolean("damage-on-hurt", true);
+        equip.deathProtection = section.getBoolean("death-protection", false);
         readEffects(section.getMapList("death-effects"), equip.deathEffects);
     }
 
@@ -233,6 +236,7 @@ public final class ItemRepository {
         section.set("dispensable", equip.dispensable);
         section.set("swappable", equip.swappable);
         section.set("damage-on-hurt", equip.damageOnHurt);
+        section.set("death-protection", equip.deathProtection);
         section.set("death-effects", writeEffects(equip.deathEffects));
     }
 
@@ -263,6 +267,27 @@ public final class ItemRepository {
         section.set("use-remainder", extras.useRemainder);
         section.set("use-cooldown-seconds", extras.useCooldownSeconds);
         section.set("item-model", extras.itemModel);
+    }
+
+    private static void readRestrictions(ConfigurationSection section, CustomItemDefinition.RestrictionsDef restrictions) {
+        if (section == null) {
+            return;
+        }
+        restrictions.cancelDrop = section.getBoolean("cancel-drop", false);
+        restrictions.cancelPlacement = section.getBoolean("cancel-placement", false);
+        restrictions.cancelToolInteractions = section.getBoolean("cancel-tool-interactions", false);
+        restrictions.cancelConsumption = section.getBoolean("cancel-consumption", false);
+        restrictions.cancelCraft = section.getBoolean("cancel-craft", false);
+        restrictions.cancelEnchantAnvil = section.getBoolean("cancel-enchant-anvil", false);
+    }
+
+    private static void writeRestrictions(ConfigurationSection section, CustomItemDefinition.RestrictionsDef restrictions) {
+        section.set("cancel-drop", restrictions.cancelDrop);
+        section.set("cancel-placement", restrictions.cancelPlacement);
+        section.set("cancel-tool-interactions", restrictions.cancelToolInteractions);
+        section.set("cancel-consumption", restrictions.cancelConsumption);
+        section.set("cancel-craft", restrictions.cancelCraft);
+        section.set("cancel-enchant-anvil", restrictions.cancelEnchantAnvil);
     }
 
     private static void readEffects(List<Map<?, ?>> maps, List<CustomItemDefinition.EffectDef> target) {

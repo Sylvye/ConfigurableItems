@@ -24,6 +24,7 @@ public final class CustomItemDefinition {
     private ToolDef tool = new ToolDef();
     private EquipDef equip = new EquipDef();
     private ExtrasDef extras = new ExtrasDef();
+    private RestrictionsDef restrictions = new RestrictionsDef();
     private final Map<TriggerType, List<String>> triggers = new EnumMap<>(TriggerType.class);
 
     public CustomItemDefinition(String id) {
@@ -44,6 +45,7 @@ public final class CustomItemDefinition {
         copy.tool = tool.copy();
         copy.equip = equip.copy();
         copy.extras = extras.copy();
+        copy.restrictions = restrictions.copy();
         triggers.forEach((type, commands) -> copy.triggers.put(type, new ArrayList<>(commands)));
         return copy;
     }
@@ -124,6 +126,10 @@ public final class CustomItemDefinition {
         return extras;
     }
 
+    public RestrictionsDef restrictions() {
+        return restrictions;
+    }
+
     public Map<TriggerType, List<String>> triggers() {
         return triggers;
     }
@@ -186,6 +192,7 @@ public final class CustomItemDefinition {
         public boolean dispensable = true;
         public boolean swappable = true;
         public boolean damageOnHurt = true;
+        public boolean deathProtection;
         public final List<EffectDef> deathEffects = new ArrayList<>();
 
         EquipDef copy() {
@@ -197,6 +204,7 @@ public final class CustomItemDefinition {
             copy.dispensable = dispensable;
             copy.swappable = swappable;
             copy.damageOnHurt = damageOnHurt;
+            copy.deathProtection = deathProtection;
             deathEffects.forEach(e -> copy.deathEffects.add(e.copy()));
             return copy;
         }
@@ -226,6 +234,26 @@ public final class CustomItemDefinition {
             copy.useRemainder = useRemainder;
             copy.useCooldownSeconds = useCooldownSeconds;
             copy.itemModel = itemModel;
+            return copy;
+        }
+    }
+
+    public static final class RestrictionsDef {
+        public boolean cancelDrop;
+        public boolean cancelPlacement;
+        public boolean cancelToolInteractions;
+        public boolean cancelConsumption;
+        public boolean cancelCraft;
+        public boolean cancelEnchantAnvil;
+
+        RestrictionsDef copy() {
+            RestrictionsDef copy = new RestrictionsDef();
+            copy.cancelDrop = cancelDrop;
+            copy.cancelPlacement = cancelPlacement;
+            copy.cancelToolInteractions = cancelToolInteractions;
+            copy.cancelConsumption = cancelConsumption;
+            copy.cancelCraft = cancelCraft;
+            copy.cancelEnchantAnvil = cancelEnchantAnvil;
             return copy;
         }
     }
