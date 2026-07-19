@@ -1,0 +1,14 @@
+.gradle/
+build/
+
+*.class
+*.jar
+
+.idea/
+*.iml
+.vscode/
+
+*.log
+*.tmp
+*.swp
+*~

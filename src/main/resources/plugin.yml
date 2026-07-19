@@ -1,0 +1,15 @@
+name: ConfigurableItems
+version: ${version}
+main: com.bountysmp.configurableitems.ConfigurableItemsPlugin
+api-version: '1.21'
+authors: [BountySMP]
+description: In-game editor for configurable custom items.
+commands:
+  configurableitems:
+    description: Opens the ConfigurableItems editor.
+    usage: /configurableitems
+    aliases: [ci, citems]
+permissions:
+  configurableitems.admin:
+    description: Allows access to ConfigurableItems admin tools.
+    default: op
