@@ -50,6 +50,10 @@ final class ActionExecutionContext {
         return target instanceof LivingEntity living ? living : self();
     }
 
+    boolean hasLivingTarget() {
+        return target instanceof LivingEntity;
+    }
+
     Location location() {
         if (location != null) {
             return location;
@@ -70,6 +74,10 @@ final class ActionExecutionContext {
         this.location = this.target.getLocation();
         this.block = null;
         putEntityVariables(this.target);
+    }
+
+    void clearTarget() {
+        this.target = null;
     }
 
     void location(Location location) {

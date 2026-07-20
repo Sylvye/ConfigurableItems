@@ -12,6 +12,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -50,18 +51,24 @@ public final class TriggerListener implements Listener {
         this.executor = executor;
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onInteract(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND || !event.hasItem()) {
             return;
         }
         Action action = event.getAction();
+        if (!shouldHandleInteract(action, event.hasBlock(), event.useInteractedBlock())) {
+            return;
+        }
         if (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
             fire(event.getPlayer(), event.getItem(), TriggerType.RIGHT_CLICK, ctx -> {
                 if (event.getClickedBlock() != null) {
                     ctx.block(event.getClickedBlock());
                 }
             });
+            if (event.getClickedBlock() != null) {
+                fire(event.getPlayer(), event.getItem(), TriggerType.RIGHT_CLICK_BLOCK, ctx -> ctx.block(event.getClickedBlock()));
+            }
             fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {
                 if (event.getClickedBlock() != null) {
                     ctx.block(event.getClickedBlock());
@@ -73,6 +80,9 @@ public final class TriggerListener implements Listener {
                     ctx.block(event.getClickedBlock());
                 }
             });
+            if (event.getClickedBlock() != null) {
+                fire(event.getPlayer(), event.getItem(), TriggerType.LEFT_CLICK_BLOCK, ctx -> ctx.block(event.getClickedBlock()));
+            }
             fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {
                 if (event.getClickedBlock() != null) {
                     ctx.block(event.getClickedBlock());
@@ -225,13 +235,27 @@ public final class TriggerListener implements Listener {
         long now = System.currentTimeMillis();
         UUID dedupKey = new UUID(player.getUniqueId().getMostSignificantBits(), player.getUniqueId().getLeastSignificantBits() ^ type.ordinal());
         Long last = clickDedup.get(dedupKey);
-        if ((type == TriggerType.RIGHT_CLICK || type == TriggerType.LEFT_CLICK || type == TriggerType.ALL_CLICK) && last != null && now - last < 50L) {
+        if (isClickTrigger(type) && last != null && now - last < 50L) {
             return;
         }
         clickDedup.put(dedupKey, now);
         TriggerContext context = new TriggerContext(type, itemId.get(), definition.customName(), player);
         mutator.apply(context);
         executor.fire(context);
+    }
+
+    private boolean isClickTrigger(TriggerType type) {
+        return type == TriggerType.RIGHT_CLICK
+            || type == TriggerType.RIGHT_CLICK_BLOCK
+            || type == TriggerType.LEFT_CLICK
+            || type == TriggerType.LEFT_CLICK_BLOCK
+            || type == TriggerType.ALL_CLICK;
+    }
+
+    static boolean shouldHandleInteract(Action action, boolean hasClickedBlock, Event.Result useInteractedBlock) {
+        return !(hasClickedBlock
+            && (action == Action.RIGHT_CLICK_BLOCK || action == Action.LEFT_CLICK_BLOCK)
+            && useInteractedBlock == Event.Result.DENY);
     }
 
     @FunctionalInterface

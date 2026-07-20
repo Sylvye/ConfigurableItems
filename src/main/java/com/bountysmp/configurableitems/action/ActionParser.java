@@ -74,6 +74,11 @@ public final class ActionParser {
                     steps.add(parseFor(raw));
                     continue;
                 }
+                if (hasNestedInlineBody(upper)) {
+                    steps.add(new ActionStep.Simple(raw));
+                    index++;
+                    continue;
+                }
                 for (String part : splitInline(raw)) {
                     steps.add(new ActionStep.Simple(part));
                 }
@@ -144,6 +149,15 @@ public final class ActionParser {
                 return upper.equals(expected) || upper.equals("ENDFOR " + expected.substring("END_FOR ".length()));
             }
             return upper.equals(expected);
+        }
+
+        private boolean hasNestedInlineBody(String upper) {
+            return upper.startsWith("IF ")
+                || upper.startsWith("AROUND ")
+                || upper.startsWith("MOB_AROUND ")
+                || upper.startsWith("NEAREST ")
+                || upper.startsWith("MOB_NEAREST ")
+                || upper.startsWith("HITSCAN ");
         }
     }
 }

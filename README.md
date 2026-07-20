@@ -61,9 +61,30 @@ triggers:
     - "SEND_MESSAGE &aActivated {ITEM_NAME}"
     - "PARTICLE FLAME 20 0.2 0.01"
     - "minecraft:give {SELF} minecraft:diamond 1"
+  RIGHT_CLICK_BLOCK:
+    - "SEND_MESSAGE &eClicked {BLOCK}"
 ```
 
 Lines run from top to bottom. If a line starts with a known CI action name, ConfigurableItems executes it through the action engine. If not, the line is dispatched synchronously by the server console as a normal command.
+
+Trigger lines can optionally have per-player cooldowns. Existing plain string lines are still valid. In the GUI trigger command list, left-click removes a row and right-click prompts for cooldown input:
+
+```text
+[TICKS] [optional message]
+```
+
+Example YAML with one cooled line:
+
+```yaml
+triggers:
+  RIGHT_CLICK:
+    - command: "DASH 1.8"
+      cooldown-ticks: 100
+      cooldown-message: "&cThat ability is on cooldown for {COOLDOWN}s."
+    - "PARTICLE CLOUD 30 0.2 0.05"
+```
+
+Cooldowns are disabled by default. Use `clear` or `0` in the GUI cooldown prompt to disable one. If no message is set, the command is skipped silently while cooling down. In cooldown messages, `{COOLDOWN}` is the whole seconds remaining, rounded up.
 
 Known CI action:
 
@@ -105,7 +126,7 @@ Target variables are available when the trigger has an entity target, or inside 
 | `{ENTITY}` | Target entity registry id. |
 | `{ENTITY_UUID}` | UUID of the target entity. |
 
-Block variables are available when the trigger has a block, or inside `HITSCAN`/block actions after a block is selected:
+Block variables are available on block-specific triggers, or inside `HITSCAN`/block actions after a block is selected:
 
 | Variable | Value |
 | --- | --- |
@@ -129,8 +150,10 @@ END_FOR color
 
 | Trigger | Fires When | Main Context |
 | --- | --- | --- |
-| `RIGHT_CLICK` | Player right-clicks air or block with the item in main hand. | Self, optional block. |
-| `LEFT_CLICK` | Player left-clicks air or block with the item in main hand. | Self, optional block. |
+| `RIGHT_CLICK` | Player right-clicks air or block with the item in main hand. | Self. |
+| `RIGHT_CLICK_BLOCK` | Player right-clicks a block with the item in main hand. | Self, block. |
+| `LEFT_CLICK` | Player left-clicks air or block with the item in main hand. | Self. |
+| `LEFT_CLICK_BLOCK` | Player left-clicks a block with the item in main hand. | Self, block. |
 | `ALL_CLICK` | Any left or right click handled by the click listener. | Self, optional block. |
 | `CONSUME` | Player consumes the item. | Self. |
 | `BLOCK_BREAK` | Player breaks a block with the item in main hand. | Self, block. |
@@ -158,9 +181,9 @@ END_FOR color
 
 Notes:
 
-- Click triggers only listen to the main hand and deduplicate likely double fires within a short window.
+- Click triggers only listen to the main hand and deduplicate likely double fires within a short window. They handle Paper's cancelled air/no-op interact events so air clicks can fire; denied block interactions are still skipped. `RIGHT_CLICK` and `LEFT_CLICK` stay broad for compatibility; use `RIGHT_CLICK_BLOCK` and `LEFT_CLICK_BLOCK` when `{BLOCK}` is needed.
 - Projectile hit triggers are linked to the item id recorded when the projectile launched.
-- Most trigger listeners use `ignoreCancelled = true`. If a configured restriction cancels drop, placement, consumption, crafting, enchant/anvil, or tool interaction, matching triggers do not fire for that cancelled event.
+- Most non-click trigger listeners use `ignoreCancelled = true`. If a configured restriction cancels drop, placement, consumption, crafting, enchant/anvil, or tool interaction, matching triggers do not fire for that cancelled event.
 - `HIT_BY_*` and `DEATH` currently check the player's main hand item.
 
 ## Action Syntax
@@ -172,6 +195,7 @@ Action lines are whitespace-tokenized. Text actions such as `SEND_MESSAGE` and `
 ```text
 DAMAGE 5
 PARTICLE FLAME 20 0.2 0.01
+PARTICLE_LINE FLAME 8 24 0 0
 ```
 
 ### Key Args
@@ -383,6 +407,7 @@ In a `HIT_PLAYER` trigger folder, `DAMAGE 4` damages the hit player because that
 | `SEND_MESSAGE <text>` | Sends a chat message to the current player target, or `{SELF}` if the target is not a player. Supports `&` color/style codes. |
 | `ACTIONBAR <text>` | Sends an actionbar message to the current player target, or `{SELF}` if the target is not a player. Supports `&` color/style codes. |
 | `PARTICLE <type> <count> [offset] [speed]` | Spawns a Bukkit particle at the current action location. |
+| `PARTICLE_LINE <type> <distance> <points> [offset] [speed]` | Spawns one particle per point in a line from the current action location along the player's look direction. |
 
 Examples:
 
@@ -390,6 +415,7 @@ Examples:
 SEND_MESSAGE &aItem ready.
 ACTIONBAR &eCooldown complete
 PARTICLE FLAME 20 0.2 0.01
+PARTICLE_LINE FLAME 8 24 0 0
 ```
 
 Particle types are validated against the Paper/Bukkit particle registry.
@@ -573,6 +599,7 @@ DASH
 SEND_MESSAGE
 ACTIONBAR
 PARTICLE
+PARTICLE_LINE
 SET_BLOCK
 SET_TEMP_BLOCK
 BREAK_BLOCK

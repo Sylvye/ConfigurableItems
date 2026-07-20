@@ -5,7 +5,9 @@ import java.util.Set;
 
 public enum TriggerType {
     RIGHT_CLICK,
+    RIGHT_CLICK_BLOCK,
     LEFT_CLICK,
+    LEFT_CLICK_BLOCK,
     ALL_CLICK,
     CONSUME,
     BLOCK_BREAK,
@@ -46,6 +48,8 @@ public enum TriggerType {
     );
 
     public static final Set<TriggerType> BLOCK_TRIGGERS = EnumSet.of(
+        RIGHT_CLICK_BLOCK,
+        LEFT_CLICK_BLOCK,
         BLOCK_BREAK,
         BLOCK_PLACE,
         PROJECTILE_HIT_BLOCK

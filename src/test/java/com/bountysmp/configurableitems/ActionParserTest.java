@@ -16,6 +16,7 @@ final class ActionParserTest {
     void detectsKnownActions() {
         assertTrue(ActionEngine.isKnownActionName("DAMAGE"));
         assertTrue(ActionEngine.isKnownActionName("send_message"));
+        assertTrue(ActionEngine.isKnownActionName("PARTICLE_LINE"));
         assertFalse(ActionEngine.isKnownActionName("minecraft:give"));
     }
 
@@ -23,6 +24,16 @@ final class ActionParserTest {
     void splitsInlineChains() {
         assertEquals(List.of("DAMAGE 1", "SEND_MESSAGE &aHit"), ActionParser.splitInline("DAMAGE 1 <+> SEND_MESSAGE &aHit"));
         assertEquals(List.of("give a", "give b"), ActionParser.splitRandomInline("give a +++ give b"));
+    }
+
+    @Test
+    void keepsSelectorInlineChainsInsideNestedBody() {
+        ActionParser.ParseResult result = ActionParser.parse(List.of("HITSCAN 24 DAMAGE 8 <+> PARTICLE CRIT 40"));
+
+        assertTrue(result.ok());
+        ActionStep.Simple simple = assertInstanceOf(ActionStep.Simple.class, result.steps().getFirst());
+        assertEquals("HITSCAN 24 DAMAGE 8 <+> PARTICLE CRIT 40", simple.line());
+        assertEquals(1, result.steps().size());
     }
 
     @Test

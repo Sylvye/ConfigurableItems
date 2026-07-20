@@ -146,7 +146,19 @@ public final class ItemRepository {
         ConfigurationSection triggerSection = yaml.createSection("triggers");
         item.triggers().forEach((type, commands) -> {
             if (!commands.isEmpty()) {
-                triggerSection.set(type.name(), commands);
+                List<Object> values = new ArrayList<>();
+                for (CustomItemDefinition.TriggerCommandDef command : commands) {
+                    if (command.cooldownEnabled()) {
+                        Map<String, Object> map = new LinkedHashMap<>();
+                        map.put("command", command.command());
+                        map.put("cooldown-ticks", command.cooldownTicks());
+                        map.put("cooldown-message", command.cooldownMessage());
+                        values.add(map);
+                    } else {
+                        values.add(command.command());
+                    }
+                }
+                triggerSection.set(type.name(), values);
             }
         });
     }
@@ -323,14 +335,30 @@ public final class ItemRepository {
         return maps;
     }
 
-    private static void readTriggers(ConfigurationSection section, Map<TriggerType, List<String>> triggers) {
+    private static void readTriggers(ConfigurationSection section, Map<TriggerType, List<CustomItemDefinition.TriggerCommandDef>> triggers) {
         if (section == null) {
             return;
         }
         for (String key : section.getKeys(false)) {
             try {
                 TriggerType type = TriggerType.valueOf(key.toUpperCase(Locale.ROOT));
-                triggers.put(type, new ArrayList<>(section.getStringList(key)));
+                List<CustomItemDefinition.TriggerCommandDef> commands = new ArrayList<>();
+                List<?> values = section.getList(key, List.of());
+                for (Object value : values) {
+                    if (value instanceof String command) {
+                        commands.add(new CustomItemDefinition.TriggerCommandDef(command));
+                    } else if (value instanceof Map<?, ?> map) {
+                        String command = text(map, "command", "");
+                        if (!command.isBlank()) {
+                            commands.add(new CustomItemDefinition.TriggerCommandDef(
+                                command,
+                                number(map, "cooldown-ticks", 0).intValue(),
+                                text(map, "cooldown-message", "")
+                            ));
+                        }
+                    }
+                }
+                triggers.put(type, commands);
             } catch (IllegalArgumentException ignored) {
                 // Unknown triggers are ignored for V0.
             }

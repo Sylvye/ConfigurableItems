@@ -5,6 +5,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.bukkit.Material;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.inventory.EquipmentSlot;
@@ -25,7 +26,7 @@ public final class CustomItemDefinition {
     private EquipDef equip = new EquipDef();
     private ExtrasDef extras = new ExtrasDef();
     private RestrictionsDef restrictions = new RestrictionsDef();
-    private final Map<TriggerType, List<String>> triggers = new EnumMap<>(TriggerType.class);
+    private final Map<TriggerType, List<TriggerCommandDef>> triggers = new EnumMap<>(TriggerType.class);
 
     public CustomItemDefinition(String id) {
         this.id = id;
@@ -46,7 +47,7 @@ public final class CustomItemDefinition {
         copy.equip = equip.copy();
         copy.extras = extras.copy();
         copy.restrictions = restrictions.copy();
-        triggers.forEach((type, commands) -> copy.triggers.put(type, new ArrayList<>(commands)));
+        triggers.forEach((type, commands) -> copy.triggers.put(type, commands.stream().map(TriggerCommandDef::copy).collect(Collectors.toCollection(ArrayList::new))));
         return copy;
     }
 
@@ -130,12 +131,40 @@ public final class CustomItemDefinition {
         return restrictions;
     }
 
-    public Map<TriggerType, List<String>> triggers() {
+    public Map<TriggerType, List<TriggerCommandDef>> triggers() {
         return triggers;
     }
 
-    public List<String> commands(TriggerType type) {
+    public List<TriggerCommandDef> commands(TriggerType type) {
         return triggers.computeIfAbsent(type, ignored -> new ArrayList<>());
+    }
+
+    public record TriggerCommandDef(String command, int cooldownTicks, String cooldownMessage) {
+        public TriggerCommandDef {
+            command = command == null ? "" : command;
+            cooldownTicks = Math.max(0, cooldownTicks);
+            cooldownMessage = cooldownMessage == null ? "" : cooldownMessage;
+        }
+
+        public TriggerCommandDef(String command) {
+            this(command, 0, "");
+        }
+
+        public boolean cooldownEnabled() {
+            return cooldownTicks > 0;
+        }
+
+        public TriggerCommandDef withCooldown(int ticks, String message) {
+            return new TriggerCommandDef(command, ticks, message);
+        }
+
+        public TriggerCommandDef withCommand(String command) {
+            return new TriggerCommandDef(command, cooldownTicks, cooldownMessage);
+        }
+
+        public TriggerCommandDef copy() {
+            return new TriggerCommandDef(command, cooldownTicks, cooldownMessage);
+        }
     }
 
     public record EnchantDef(String key, int level) {

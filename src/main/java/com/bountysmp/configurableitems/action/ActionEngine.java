@@ -35,7 +35,7 @@ public final class ActionEngine {
     private static final Set<String> ACTIONS = Set.of(
         "DELAY_TICK", "IF", "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN",
         "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DASH",
-        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
+        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
     );
 
     private final Plugin plugin;
@@ -159,6 +159,10 @@ public final class ActionEngine {
             return;
         }
         List<String> tokens = tokens(line);
+        if (ActionFormatter.isEntityActionName(action) && !context.hasLivingTarget()) {
+            warn(context.triggerContext(), action + " requires a living target");
+            return;
+        }
         switch (action) {
             case "IF" -> runIf(context, line.substring(2).trim());
             case "AROUND" -> runSelector(context, tokens, true, false, line);
@@ -178,6 +182,7 @@ public final class ActionEngine {
             case "SEND_MESSAGE" -> sendMessage(context, line.substring(action.length()).trim());
             case "ACTIONBAR" -> actionbar(context, line.substring(action.length()).trim());
             case "PARTICLE" -> particle(context, tokens);
+            case "PARTICLE_LINE" -> particleLine(context, tokens);
             case "SET_BLOCK" -> setBlock(context, tokens);
             case "SET_TEMP_BLOCK" -> setTempBlock(context, tokens);
             case "BREAK_BLOCK" -> breakBlock(context, tokens);
@@ -239,28 +244,28 @@ public final class ActionEngine {
             return;
         }
         ActionExecutionContext scoped = context.copy();
-        Entity entity = rayEntity(context.self(), distance);
+        Entity entity = rayEntity(context.self(), distance, context.target());
         if (entity != null) {
             scoped.target(entity);
         } else {
             Block block = context.self().getTargetBlockExact(distance);
             if (block != null) {
                 scoped.block(block);
+                scoped.clearTarget();
             } else {
-                warn(context.triggerContext(), "HITSCAN found no entity or block");
                 return;
             }
         }
         ActionParser.splitInline(body).forEach(part -> runSimple(scoped, part));
     }
 
-    private Entity rayEntity(Player player, int distance) {
+    private Entity rayEntity(Player player, int distance, Entity excludedSource) {
         Location eye = player.getEyeLocation();
         Vector direction = eye.getDirection().normalize();
         Entity best = null;
         double bestProjection = Double.MAX_VALUE;
         for (Entity entity : player.getNearbyEntities(distance, distance, distance)) {
-            if (!(entity instanceof LivingEntity) || entity == player) {
+            if (!(entity instanceof LivingEntity) || sameEntity(entity, player) || sameEntity(entity, excludedSource)) {
                 continue;
             }
             Vector toEntity = entity.getLocation().add(0, entity.getHeight() / 2.0, 0).toVector().subtract(eye.toVector());
@@ -275,6 +280,10 @@ public final class ActionEngine {
             }
         }
         return best;
+    }
+
+    static boolean sameEntity(Entity first, Entity second) {
+        return first != null && second != null && (first == second || first.equals(second) || first.getUniqueId().equals(second.getUniqueId()));
     }
 
     private void heal(ActionExecutionContext context, double amount) {
@@ -345,6 +354,38 @@ public final class ActionEngine {
         double offset = doubleArg(tokens, 3, 0.1);
         double speed = doubleArg(tokens, 4, 0.0);
         context.location().getWorld().spawnParticle(particle, context.location(), count, offset, offset, offset, speed);
+    }
+
+    private void particleLine(ActionExecutionContext context, List<String> tokens) {
+        if (tokens.size() < 4) {
+            warn(context.triggerContext(), "PARTICLE_LINE requires type, distance, and points");
+            return;
+        }
+        Particle particle = Registry.PARTICLE_TYPE.match(tokens.get(1));
+        if (particle == null) {
+            warn(context.triggerContext(), "Unknown particle: " + tokens.get(1));
+            return;
+        }
+        double distance = Math.max(0.0, doubleArg(tokens, 2, 0.0));
+        int points = Math.max(1, intArg(tokens, 3, 1));
+        double offset = doubleArg(tokens, 4, 0.0);
+        double speed = doubleArg(tokens, 5, 0.0);
+        Location start = context.location().clone();
+        if (context.target() == context.self()) {
+            start = context.self().getEyeLocation();
+        } else if (context.block() != null) {
+            start.add(0.5, 0.5, 0.5);
+        }
+        Vector direction = context.self().getEyeLocation().getDirection();
+        if (direction.lengthSquared() == 0.0) {
+            direction = new Vector(0, 0, 1);
+        }
+        direction.normalize();
+        double step = points == 1 ? 0.0 : distance / (points - 1);
+        for (int i = 0; i < points; i++) {
+            Location point = start.clone().add(direction.clone().multiply(step * i));
+            point.getWorld().spawnParticle(particle, point, 1, offset, offset, offset, speed);
+        }
     }
 
     private void setBlock(ActionExecutionContext context, List<String> tokens) {
