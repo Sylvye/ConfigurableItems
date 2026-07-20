@@ -22,11 +22,11 @@ public final class InputManager implements Listener {
         this.plugin = plugin;
     }
 
-    public void prompt(Player player, String prompt, Consumer<String> handler) {
-        inputs.put(player.getUniqueId(), new PendingInput(handler));
+    public void prompt(Player player, String prompt, Consumer<String> handler, Runnable cancelHandler) {
+        inputs.put(player.getUniqueId(), new PendingInput(handler, cancelHandler));
         player.closeInventory();
         player.sendMessage(Component.text(prompt, NamedTextColor.AQUA));
-        player.sendMessage(Component.text("Type cancel to abort.", NamedTextColor.GRAY));
+        player.sendMessage(Component.text("Type cancel or abort to return.", NamedTextColor.GRAY));
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -38,14 +38,15 @@ public final class InputManager implements Listener {
         event.setCancelled(true);
         String message = event.getMessage();
         Bukkit.getScheduler().runTask(plugin, () -> {
-            if (message.equalsIgnoreCase("cancel")) {
+            if (message.equalsIgnoreCase("cancel") || message.equalsIgnoreCase("abort")) {
                 event.getPlayer().sendMessage(Component.text("Input cancelled.", NamedTextColor.RED));
+                input.cancelHandler.run();
                 return;
             }
             input.handler.accept(message);
         });
     }
 
-    private record PendingInput(Consumer<String> handler) {
+    private record PendingInput(Consumer<String> handler, Runnable cancelHandler) {
     }
 }

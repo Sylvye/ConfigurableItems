@@ -167,11 +167,11 @@ public final class GuiManager implements Listener {
         button(menu, 11, Material.APPLE, NamedTextColor.AQUA, "Nutrition", String.valueOf(item.food().nutrition), e -> input(player, "Enter nutrition integer", raw -> {
             item.food().nutrition = parseInt(raw, item.food().nutrition);
             openFood(player, item);
-        }));
+        }, () -> openFood(player, item)));
         button(menu, 12, Material.HONEY_BOTTLE, NamedTextColor.AQUA, "Saturation", String.valueOf(item.food().saturation), e -> input(player, "Enter saturation number", raw -> {
             item.food().saturation = parseFloat(raw, item.food().saturation);
             openFood(player, item);
-        }));
+        }, () -> openFood(player, item)));
         button(menu, 13, Material.GOLDEN_APPLE, item.food().alwaysEat ? NamedTextColor.GREEN : NamedTextColor.RED, "Always Eat", status(item.food().alwaysEat), e -> {
             item.food().alwaysEat = !item.food().alwaysEat;
             openFood(player, item);
@@ -179,7 +179,7 @@ public final class GuiManager implements Listener {
         button(menu, 14, Material.CLOCK, NamedTextColor.AQUA, "Eat Seconds", String.valueOf(item.food().eatSeconds), e -> input(player, "Enter consume seconds", raw -> {
             item.food().eatSeconds = parseFloat(raw, item.food().eatSeconds);
             openFood(player, item);
-        }));
+        }, () -> openFood(player, item)));
         button(menu, 15, Material.BOWL, NamedTextColor.AQUA, "Animation", item.food().animation, e -> {
             item.food().animation = next(item.food().animation, "EAT", "DRINK", "BLOCK", "BOW", "SPEAR", "CROSSBOW", "SPYGLASS", "HORN", "BRUSH");
             openFood(player, item);
@@ -201,7 +201,7 @@ public final class GuiManager implements Listener {
         button(menu, 11, Material.GOLDEN_PICKAXE, NamedTextColor.AQUA, "Default Speed", String.valueOf(item.tool().defaultSpeed), e -> input(player, "Enter default mining speed", raw -> {
             item.tool().defaultSpeed = parseFloat(raw, item.tool().defaultSpeed);
             openTool(player, item);
-        }));
+        }, () -> openTool(player, item)));
         back(menu, player, item);
         player.openInventory(inv);
     }
@@ -266,7 +266,7 @@ public final class GuiManager implements Listener {
         button(menu, 22, Material.CLOCK, NamedTextColor.AQUA, "Use Cooldown", String.valueOf(item.extras().useCooldownSeconds), e -> input(player, "Enter cooldown seconds, or clear", raw -> {
             item.extras().useCooldownSeconds = raw.equalsIgnoreCase("clear") ? null : parseFloat(raw, item.extras().useCooldownSeconds == null ? 0f : item.extras().useCooldownSeconds);
             openExtras(player, item);
-        }));
+        }, () -> openExtras(player, item)));
         button(menu, 23, Material.ITEM_FRAME, NamedTextColor.AQUA, "Item Model", String.valueOf(item.extras().itemModel), e -> openItemModelSelector(player, item, 0, ""));
         back(menu, player, item);
         player.openInventory(inv);
@@ -328,7 +328,7 @@ public final class GuiManager implements Listener {
             String command = ActionFormatter.normalizeLine(raw.startsWith("/") ? raw.substring(1) : raw);
             item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(command));
             openTriggerCommands(player, item, type);
-        }));
+        }, () -> openTriggerCommands(player, item, type)));
         button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", String.join(", ", TriggerExecutor.allowedVariables(type)));
         button(menu, 12, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Add Action", "Choose a CI action", e -> openActionSelector(player, item, type, -1, 0, ""));
         int slot = 19;
@@ -366,7 +366,7 @@ public final class GuiManager implements Listener {
                 String normalized = ActionFormatter.normalizeLine(raw.startsWith("/") ? raw.substring(1) : raw);
                 commands.set(index, commands.get(index).withCommand(normalized));
                 openTriggerCommands(player, item, type);
-            });
+            }, () -> openTriggerCommands(player, item, type));
             return;
         }
         ActionSpec spec = actionSpec(actionName);
@@ -374,11 +374,11 @@ public final class GuiManager implements Listener {
             input(player, "Edit action line", raw -> {
                 commands.set(index, commands.get(index).withCommand(ActionFormatter.normalizeLine(raw)));
                 openTriggerCommands(player, item, type);
-            });
+            }, () -> openTriggerCommands(player, item, type));
             return;
         }
         ActionDraft draft = draftFromExisting(spec, commands, index);
-        openActionEditor(player, item, type, index, draft);
+        openActionEditor(player, item, type, index, draft, () -> openTriggerCommands(player, item, type));
     }
 
     private void removeCommandRange(List<CustomItemDefinition.TriggerCommandDef> commands, int index) {
@@ -396,7 +396,7 @@ public final class GuiManager implements Listener {
                     openTriggerCommands(player, item, type);
                     return;
                 }
-                openActionEditor(player, item, type, editIndex, ActionDraft.create(spec));
+                openActionEditor(player, item, type, editIndex, ActionDraft.create(spec), () -> openActionSelector(player, item, type, editIndex, page, filter));
             },
             () -> openTriggerCommands(player, item, type),
             null,
@@ -409,11 +409,11 @@ public final class GuiManager implements Listener {
                     item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(normalized));
                 }
                 openTriggerCommands(player, item, type);
-            })
+            }, () -> openActionSelector(player, item, type, editIndex, page, filter))
         );
     }
 
-    private void openActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft) {
+    private void openActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel) {
         Menu menu = new Menu("Action " + draft.spec.name());
         Inventory inv = menu.inventory();
         frame(inv);
@@ -425,88 +425,162 @@ public final class GuiManager implements Listener {
                 break;
             }
             int slot = slots[paramIndex++];
-            button(menu, slot, param.icon(), NamedTextColor.AQUA, param.label(), draft.value(param.key()), e -> editActionParam(player, item, type, editIndex, draft, param));
+            button(menu, slot, param.icon(), NamedTextColor.AQUA, param.label(), draft.value(param.key()), e -> editActionParam(player, item, type, editIndex, draft, param, cancel));
         }
         if (draft.spec.block()) {
-            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Body Lines", draft.body().size() + " lines", e -> openActionBodyEditor(player, item, type, editIndex, draft));
+            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Body Lines", draft.body().size() + " lines", e -> openActionBodyEditor(player, item, type, editIndex, draft, cancel));
         } else if (draft.spec.hasBody()) {
-            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", draft.body().isEmpty() ? "Empty" : String.join(" <+> ", draft.body()), e -> openActionBodyEditor(player, item, type, editIndex, draft));
+            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", draft.body().isEmpty() ? "Empty" : String.join(" <+> ", draft.body()), e -> openActionBodyEditor(player, item, type, editIndex, draft, cancel));
         }
-        button(menu, 45, Material.BARRIER, NamedTextColor.RED, "Cancel", "", e -> openTriggerCommands(player, item, type));
+        button(menu, 45, Material.BARRIER, NamedTextColor.RED, "Cancel", "", e -> cancel.run());
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionSelector(player, item, type, editIndex, 0, ""));
-        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, editIndex >= 0 ? "Save Action" : "Add Action", preview(draft), e -> saveActionDraft(player, item, type, editIndex, draft));
+        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, editIndex >= 0 ? "Save Action" : "Add Action", preview(draft), e -> saveActionDraft(player, item, type, editIndex, draft, cancel));
         player.openInventory(inv);
     }
 
-    private void editActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, ActionParam param) {
+    private void editActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, ActionParam param, Runnable cancel) {
         if (param.kind() == ParamKind.BOOLEAN) {
             draft.put(param.key(), String.valueOf(!Boolean.parseBoolean(draft.value(param.key()))));
-            openActionEditor(player, item, type, editIndex, draft);
+            openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         if (param.kind() == ParamKind.TARGET_MODE) {
             draft.put(param.key(), next(draft.value(param.key()), "COORDS", "SELF", "TARGET"));
-            openActionEditor(player, item, type, editIndex, draft);
+            openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             draft.put(param.key(), value);
-            openActionEditor(player, item, type, editIndex, draft);
-        });
+            openActionEditor(player, item, type, editIndex, draft, cancel);
+        }, () -> openActionEditor(player, item, type, editIndex, draft, cancel));
     }
 
-    private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft) {
+    private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel) {
+        openActionBodyEditor(player, item, type, editIndex, draft, cancel, () -> openActionEditor(player, item, type, editIndex, draft, cancel));
+    }
+
+    private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel, Runnable backToAction) {
         Menu menu = new Menu("Action Body");
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Nested Action", "Choose a CI action", e -> openNestedActionSelector(player, item, type, editIndex, draft, 0, ""));
+        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Nested Action", "Choose a CI action", e -> openNestedActionSelector(player, item, type, editIndex, draft, cancel, backToAction, 0, ""));
         button(menu, 11, Material.NAME_TAG, NamedTextColor.YELLOW, "Add Raw Line", "", e -> input(player, "Enter nested action or command", raw -> {
             draft.body().add(ActionFormatter.normalizeLine(raw));
-            openActionBodyEditor(player, item, type, editIndex, draft);
-        }));
+            openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction);
+        }, () -> openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction)));
         int slot = 19;
         for (int i = 0; i < draft.body().size() && slot < 44; i++) {
             int bodyIndex = i;
             button(menu, slot++, Material.REDSTONE, NamedTextColor.AQUA, draft.body().get(i), "Left edit | Shift remove", e -> {
                 if (e.isShiftClick()) {
                     draft.body().remove(bodyIndex);
-                    openActionBodyEditor(player, item, type, editIndex, draft);
+                    openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction);
                     return;
                 }
-                input(player, "Edit nested action", raw -> {
-                    draft.body().set(bodyIndex, ActionFormatter.normalizeLine(raw));
-                    openActionBodyEditor(player, item, type, editIndex, draft);
-                });
+                openNestedExistingActionEditor(player, item, type, editIndex, draft, bodyIndex, cancel, backToAction);
             });
         }
-        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionEditor(player, item, type, editIndex, draft));
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> backToAction.run());
         player.openInventory(inv);
     }
 
-    private void openNestedActionSelector(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int page, String filter) {
+    private void openNestedActionSelector(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, Runnable cancel, Runnable parentBackToAction, int page, String filter) {
         openSelector(player, item, "Nested Action", actionCatalogOptions(false), page, filter,
             option -> {
                 ActionSpec spec = actionSpec(option.key());
                 if (spec != null) {
+                    int bodyIndex = parent.body().size();
                     parent.body().add(ActionFormatter.normalizeLine(ActionDraft.create(spec).format().getFirst()));
+                    openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, ActionDraft.create(spec), cancel, parentBackToAction);
+                    return;
                 }
-                openActionBodyEditor(player, item, type, editIndex, parent);
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
             },
-            () -> openActionBodyEditor(player, item, type, editIndex, parent),
+            () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction),
             null,
             () -> input(player, "Enter nested action or command", raw -> {
                 parent.body().add(ActionFormatter.normalizeLine(raw));
-                openActionBodyEditor(player, item, type, editIndex, parent);
-            })
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+            }, () -> openNestedActionSelector(player, item, type, editIndex, parent, cancel, parentBackToAction, page, filter))
         );
     }
 
-    private void saveActionDraft(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft) {
+    private void openNestedExistingActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, Runnable cancel, Runnable parentBackToAction) {
+        if (bodyIndex < 0 || bodyIndex >= parent.body().size()) {
+            openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+            return;
+        }
+        String line = parent.body().get(bodyIndex);
+        ActionSpec spec = actionSpec(firstToken(line));
+        if (spec == null || spec.block()) {
+            input(player, "Edit nested command", raw -> {
+                parent.body().set(bodyIndex, ActionFormatter.normalizeLine(raw));
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+            }, () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
+            return;
+        }
+        openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, draftFromLine(spec, line), cancel, parentBackToAction);
+    }
+
+    private void openNestedActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, Runnable cancel, Runnable parentBackToAction) {
+        Menu menu = new Menu("Nested " + nested.spec.name());
+        Inventory inv = menu.inventory();
+        frame(inv);
+        button(menu, 4, nested.spec.icon(), NamedTextColor.AQUA, nested.spec.name(), preview(nested));
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25};
+        int paramIndex = 0;
+        for (ActionParam param : nested.spec.params()) {
+            if (paramIndex >= slots.length) {
+                break;
+            }
+            int slot = slots[paramIndex++];
+            button(menu, slot, param.icon(), NamedTextColor.AQUA, param.label(), nested.value(param.key()), e -> editNestedActionParam(player, item, type, editIndex, parent, bodyIndex, nested, param, cancel, parentBackToAction));
+        }
+        if (nested.spec.hasBody()) {
+            Runnable backToNested = () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", nested.body().isEmpty() ? "Empty" : String.join(" <+> ", nested.body()), e -> openActionBodyEditor(player, item, type, editIndex, nested, backToNested, backToNested));
+        }
+        button(menu, 45, Material.BARRIER, NamedTextColor.RED, "Cancel", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
+        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, "Save Nested", preview(nested), e -> saveNestedActionDraft(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction));
+        player.openInventory(inv);
+    }
+
+    private void editNestedActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, ActionParam param, Runnable cancel, Runnable parentBackToAction) {
+        if (param.kind() == ParamKind.BOOLEAN) {
+            nested.put(param.key(), String.valueOf(!Boolean.parseBoolean(nested.value(param.key()))));
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
+        if (param.kind() == ParamKind.TARGET_MODE) {
+            nested.put(param.key(), next(nested.value(param.key()), "COORDS", "SELF", "TARGET"));
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
+        input(player, param.prompt(), raw -> {
+            String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
+            nested.put(param.key(), value);
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+        }, () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction));
+    }
+
+    private void saveNestedActionDraft(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, Runnable cancel, Runnable parentBackToAction) {
+        List<String> lines = ActionFormatter.normalizeLines(nested.format());
+        if (lines.isEmpty()) {
+            error(player, "Action is empty.");
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
+        parent.body().set(bodyIndex, lines.getFirst());
+        openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+    }
+
+    private void saveActionDraft(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel) {
         List<String> lines = ActionFormatter.normalizeLines(draft.format());
         if (lines.isEmpty()) {
             error(player, "Action is empty.");
-            openActionEditor(player, item, type, editIndex, draft);
+            openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
@@ -620,6 +694,10 @@ public final class GuiManager implements Listener {
         return draft;
     }
 
+    private ActionDraft draftFromLine(ActionSpec spec, String line) {
+        return draftFromExisting(spec, List.of(new CustomItemDefinition.TriggerCommandDef(line)), 0);
+    }
+
     private void replaceBody(ActionDraft draft, List<String> lines, int startInclusive, int endExclusive) {
         draft.body().clear();
         for (int i = startInclusive; i < endExclusive; i++) {
@@ -724,7 +802,7 @@ public final class GuiManager implements Listener {
                 commands.set(index, commands.get(index).withCooldown(result.ticks(), result.message()));
             }
             openTriggerCommands(player, item, type);
-        });
+        }, () -> openTriggerCommands(player, item, type));
     }
 
     private String cooldownLore(CustomItemDefinition.TriggerCommandDef command) {
@@ -751,7 +829,7 @@ public final class GuiManager implements Listener {
             option -> input(player, "Enter level for " + option.key(), raw -> {
                 item.enchantments().add(new CustomItemDefinition.EnchantDef(option.key(), parseInt(raw, 1)));
                 openEnchantments(player, item);
-            }),
+            }, () -> openEnchantmentSelector(player, item, page, filter)),
             () -> openEnchantments(player, item),
             null,
             null
@@ -772,7 +850,7 @@ public final class GuiManager implements Listener {
             .map(operation -> new SelectorOption(operation.name(), Material.COMPARATOR, operation.name(), ""))
             .toList();
         openSelector(player, item, "Attribute Operation", options, 0, "",
-            option -> input(player, "Enter value for " + attributeKey, raw -> openAttributeSlotGroupSelector(player, item, attributeKey, AttributeModifier.Operation.valueOf(option.key()), parseFloat(raw, 0.0f))),
+            option -> input(player, "Enter value for " + attributeKey, raw -> openAttributeSlotGroupSelector(player, item, attributeKey, AttributeModifier.Operation.valueOf(option.key()), parseFloat(raw, 0.0f)), () -> openAttributeOperationSelector(player, item, attributeKey)),
             () -> openAttributes(player, item),
             null,
             null
@@ -802,7 +880,7 @@ public final class GuiManager implements Listener {
                     p.length > 2 ? parseFloat(p[2], 1.0f) : 1.0f
                 ));
                 reopen.run();
-            }),
+            }, () -> openPotionEffectSelector(player, item, effects, reopen, page, filter)),
             reopen,
             null,
             null
@@ -824,7 +902,7 @@ public final class GuiManager implements Listener {
                     error(player, "Unknown sound.");
                 }
                 openEquip(player, item);
-            })
+            }, () -> openSoundSelector(player, item, page, filter))
         );
     }
 
@@ -890,7 +968,7 @@ public final class GuiManager implements Listener {
                     error(player, "Invalid namespaced key.");
                 }
                 openExtras(player, item);
-            })
+            }, () -> openItemModelSelector(player, item, page, filter))
         );
     }
 
@@ -916,7 +994,7 @@ public final class GuiManager implements Listener {
         if (safePage > 0) {
             button(menu, 45, Material.ARROW, NamedTextColor.GRAY, "Previous", "", e -> openSelector(player, item, title, options, safePage - 1, normalizedFilter, select, back, clear, custom));
         }
-        button(menu, 46, Material.COMPASS, NamedTextColor.AQUA, "Search", normalizedFilter.isBlank() ? "No filter" : normalizedFilter, e -> input(player, "Enter search filter, or clear", raw -> openSelector(player, item, title, options, 0, raw.equalsIgnoreCase("clear") ? "" : raw, select, back, clear, custom)));
+        button(menu, 46, Material.COMPASS, NamedTextColor.AQUA, "Search", normalizedFilter.isBlank() ? "No filter" : normalizedFilter, e -> input(player, "Enter search filter, or clear", raw -> openSelector(player, item, title, options, 0, raw.equalsIgnoreCase("clear") ? "" : raw, select, back, clear, custom), () -> openSelector(player, item, title, options, safePage, normalizedFilter, select, back, clear, custom)));
         if (clear != null) {
             button(menu, 47, Material.BARRIER, NamedTextColor.RED, "Clear", "", e -> clear.run());
         }
@@ -1094,21 +1172,21 @@ public final class GuiManager implements Listener {
                 return;
             }
             openEditor(player, new CustomItemDefinition(id));
-        });
+        }, () -> openMain(player, 0));
     }
 
     private void promptMaterial(Player player, CustomItemDefinition item) {
         input(player, "Enter material id, e.g. diamond_sword", raw -> {
             ValidationUtil.material(raw).ifPresentOrElse(item::material, () -> error(player, "Invalid material."));
             openEditor(player, item);
-        });
+        }, () -> openEditor(player, item));
     }
 
     private void promptName(Player player, CustomItemDefinition item) {
         input(player, "Enter custom name with & color codes", raw -> {
             item.customName(raw);
             openEditor(player, item);
-        });
+        }, () -> openEditor(player, item));
     }
 
     private void promptLore(Player player, CustomItemDefinition item) {
@@ -1118,7 +1196,7 @@ public final class GuiManager implements Listener {
                 item.lore().addAll(Arrays.stream(raw.split("\\|")).map(String::trim).filter(s -> !s.isBlank()).toList());
             }
             openEditor(player, item);
-        });
+        }, () -> openEditor(player, item));
     }
 
     private void save(Player player, CustomItemDefinition item) {
@@ -1150,7 +1228,7 @@ public final class GuiManager implements Listener {
                 effects.add(new CustomItemDefinition.EffectDef(ValidationUtil.potion(p[0]).get().key(), parseInt(p[1], 5), parseInt(p[2], 0), p.length > 3 ? parseFloat(p[3], 1.0f) : 1.0f));
             }
             reopen.run();
-        });
+        }, reopen);
     }
 
     private void listEffects(Menu menu, List<CustomItemDefinition.EffectDef> effects, Runnable reopen) {
@@ -1165,8 +1243,8 @@ public final class GuiManager implements Listener {
         }
     }
 
-    private void input(Player player, String prompt, Consumer<String> action) {
-        inputManager.prompt(player, prompt, action);
+    private void input(Player player, String prompt, Consumer<String> action, Runnable cancel) {
+        inputManager.prompt(player, prompt, action, cancel);
     }
 
     private void back(Menu menu, Player player, CustomItemDefinition item) {
@@ -1186,7 +1264,7 @@ public final class GuiManager implements Listener {
         button(menu, slot, material, NamedTextColor.AQUA, name, String.valueOf(value), e -> input(player, "Enter " + name + " integer, or clear", raw -> {
             setter.accept(raw.equalsIgnoreCase("clear") ? null : parseInt(raw, value == null ? 0 : value));
             openExtras(player, item);
-        }));
+        }, () -> openExtras(player, item)));
     }
 
     private void materialText(Menu menu, Player player, CustomItemDefinition item, int slot, Material material, String name, String value, Consumer<String> setter) {
@@ -1199,7 +1277,7 @@ public final class GuiManager implements Listener {
                 error(player, "Invalid material.");
             }
             openExtras(player, item);
-        }));
+        }, () -> openExtras(player, item)));
     }
 
     private static void frame(Inventory inv) {
