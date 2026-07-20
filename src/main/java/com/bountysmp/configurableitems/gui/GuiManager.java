@@ -2,6 +2,8 @@ package com.bountysmp.configurableitems.gui;
 
 import com.bountysmp.configurableitems.action.ActionFormatter;
 import com.bountysmp.configurableitems.action.ActionParser;
+import com.bountysmp.configurableitems.action.ActionValidator;
+import com.bountysmp.configurableitems.action.HitscanOptions;
 import com.bountysmp.configurableitems.item.ItemFactory;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
@@ -17,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -449,6 +452,11 @@ public final class GuiManager implements Listener {
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
+        if (param.kind() == ParamKind.HITSCAN_TARGET) {
+            draft.put(param.key(), next(draft.value(param.key()), "ANY", "PLAYER", "MOB"));
+            openActionEditor(player, item, type, editIndex, draft, cancel);
+            return;
+        }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             draft.put(param.key(), value);
@@ -558,6 +566,11 @@ public final class GuiManager implements Listener {
             openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
             return;
         }
+        if (param.kind() == ParamKind.HITSCAN_TARGET) {
+            nested.put(param.key(), next(nested.value(param.key()), "ANY", "PLAYER", "MOB"));
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             nested.put(param.key(), value);
@@ -646,9 +659,16 @@ public final class GuiManager implements Listener {
                 draft.body().addAll(ActionParser.splitInline(restAfter(line, 2)));
             }
             case "HITSCAN" -> {
-                draft.put("distance", token(tokens, 1, draft.value("distance")));
+                HitscanOptions options = HitscanOptions.parse(tokens);
+                draft.put("distance", String.valueOf(options.distance()));
+                draft.put("target", options.targetMode().name());
+                draft.put("maxHits", options.allHits() ? "all" : String.valueOf(options.maxHits()));
+                draft.put("particle", options.particle());
+                draft.put("points", String.valueOf(options.points()));
+                draft.put("offset", String.valueOf(options.offset()));
+                draft.put("speed", String.valueOf(options.speed()));
                 draft.body().clear();
-                draft.body().addAll(ActionParser.splitInline(restAfter(line, 2)));
+                draft.body().addAll(ActionParser.splitInline(options.body()));
             }
             case "DAMAGE", "SET_HEALTH" -> draft.put("amount", tokenOrKey(tokens, "amount", 1, draft.value("amount")));
             case "HEAL" -> draft.put("amount", tokenOrKey(tokens, "amount", 1, draft.value("amount")));
@@ -1043,7 +1063,14 @@ public final class GuiManager implements Listener {
             spec("MOB_AROUND", Material.ZOMBIE_HEAD, "Selectors", false, true, p("radius", "Radius", Material.ZOMBIE_HEAD, "Enter radius", "10", ParamKind.DOUBLE)),
             spec("NEAREST", Material.COMPASS, "Selectors", false, true, p("radius", "Radius", Material.COMPASS, "Enter radius", "10", ParamKind.DOUBLE)),
             spec("MOB_NEAREST", Material.ROTTEN_FLESH, "Selectors", false, true, p("radius", "Radius", Material.ROTTEN_FLESH, "Enter radius", "10", ParamKind.DOUBLE)),
-            spec("HITSCAN", Material.SPYGLASS, "Selectors", false, true, p("distance", "Distance", Material.SPYGLASS, "Enter distance", "32", ParamKind.INTEGER)),
+            spec("HITSCAN", Material.SPYGLASS, "Selectors", false, true,
+                p("distance", "Distance", Material.SPYGLASS, "Enter distance", "32", ParamKind.INTEGER),
+                p("target", "Target", Material.PLAYER_HEAD, "Toggle target mode", "ANY", ParamKind.HITSCAN_TARGET),
+                p("maxHits", "Max Hits", Material.CROSSBOW, "Enter positive integer or all", "1", ParamKind.TEXT),
+                p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle, or clear", "", ParamKind.TEXT),
+                p("points", "Points", Material.REPEATER, "Enter trail points", "24", ParamKind.INTEGER),
+                p("offset", "Offset", Material.SUGAR, "Enter particle offset", "0", ParamKind.DOUBLE),
+                p("speed", "Speed", Material.FEATHER, "Enter particle speed", "0", ParamKind.DOUBLE)),
             spec("DAMAGE", Material.IRON_SWORD, "Entity", false, false, p("amount", "Amount", Material.RED_DYE, "Enter damage amount", "5", ParamKind.DOUBLE)),
             spec("HEAL", Material.GOLDEN_APPLE, "Entity", false, false, p("amount", "Amount", Material.GOLDEN_APPLE, "Enter heal amount, or leave blank for full heal", "5", ParamKind.DOUBLE)),
             spec("SET_HEALTH", Material.RED_DYE, "Entity", false, false, p("amount", "Amount", Material.RED_DYE, "Enter health amount", "10", ParamKind.DOUBLE)),
@@ -1207,6 +1234,11 @@ public final class GuiManager implements Listener {
             }
             if (TriggerExecutor.invalidVariable(commands, entry.getKey()).isPresent()) {
                 error(player, "Invalid trigger variable in " + entry.getKey());
+                return;
+            }
+            Optional<String> invalidAction = ActionValidator.invalidKnownAction(commands.stream().map(CustomItemDefinition.TriggerCommandDef::command).toList());
+            if (invalidAction.isPresent()) {
+                error(player, "Invalid action in " + entry.getKey() + ": " + invalidAction.get());
                 return;
             }
         }
@@ -1377,7 +1409,8 @@ public final class GuiManager implements Listener {
         DOUBLE,
         BOOLEAN,
         VARIABLE,
-        TARGET_MODE
+        TARGET_MODE,
+        HITSCAN_TARGET
     }
 
     private record ActionParam(String key, String label, Material icon, String prompt, String defaultValue, ParamKind kind) {
@@ -1431,7 +1464,7 @@ public final class GuiManager implements Listener {
                 case "RANDOM_RUN" -> block("RANDOM_RUN selectionCount:" + value("selectionCount"), "RANDOM_END");
                 case "FOR" -> block("FOR [" + value("values") + "] > " + value("variable").toUpperCase(Locale.ROOT), "END_FOR " + value("variable").toUpperCase(Locale.ROOT));
                 case "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST" -> List.of(join(name, value("radius"), chainBody()));
-                case "HITSCAN" -> List.of(join(name, value("distance"), chainBody()));
+                case "HITSCAN" -> List.of(formatHitscan());
                 case "DAMAGE", "SET_HEALTH" -> List.of(join(name, value("amount")));
                 case "HEAL" -> value("amount").isBlank() ? List.of(name) : List.of(join(name, value("amount")));
                 case "KILL" -> List.of(name);
@@ -1461,6 +1494,22 @@ public final class GuiManager implements Listener {
             return world.isBlank()
                 ? List.of(join("TELEPORT", value("x"), value("y"), value("z")))
                 : List.of(join("TELEPORT", value("x"), value("y"), value("z"), world));
+        }
+
+        private String formatHitscan() {
+            List<String> parts = new ArrayList<>();
+            parts.add("HITSCAN");
+            parts.add(value("distance"));
+            parts.add("target:" + value("target").toUpperCase(Locale.ROOT));
+            parts.add("max-hits:" + value("maxHits").toLowerCase(Locale.ROOT));
+            if (!value("particle").isBlank()) {
+                parts.add("particle:" + value("particle").toUpperCase(Locale.ROOT));
+                parts.add("points:" + value("points"));
+                parts.add("offset:" + value("offset"));
+                parts.add("speed:" + value("speed"));
+            }
+            parts.add(chainBody());
+            return join(parts.toArray(String[]::new));
         }
 
         private List<String> block(String header, String terminator) {

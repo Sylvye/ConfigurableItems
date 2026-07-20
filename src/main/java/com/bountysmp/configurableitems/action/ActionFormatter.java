@@ -66,7 +66,10 @@ public final class ActionFormatter {
             }
             return first + " " + ifParts[0] + " " + normalizeInline(ifParts[1]);
         }
-        if (Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN").contains(first)) {
+        if (first.equals("HITSCAN")) {
+            return normalizeHitscan(first, rest);
+        }
+        if (Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST").contains(first)) {
             String[] selectorParts = rest.split("\\s+", 2);
             if (selectorParts.length < 2) {
                 return rest.isBlank() ? first : first + " " + rest;
@@ -99,6 +102,33 @@ public final class ActionFormatter {
 
     private static String normalizeInline(String raw) {
         return raw.contains("<+>") ? joinNormalized(raw, "\\s*<\\+>\\s*", " <+> ") : normalizeLine(raw);
+    }
+
+    private static String normalizeHitscan(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        int index = 0;
+        StringBuilder header = new StringBuilder(first);
+        if (index < tokens.length) {
+            header.append(' ').append(tokens[index]);
+            index++;
+        }
+        while (index < tokens.length && HitscanOptions.isHitscanOption(tokens[index])) {
+            String token = tokens[index];
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            if (key.equals("target") || key.equals("particle")) {
+                value = value.toUpperCase(Locale.ROOT);
+            } else if (key.equals("max-hits") && value.equalsIgnoreCase("all")) {
+                value = "all";
+            }
+            header.append(' ').append(key).append(':').append(value);
+            index++;
+        }
+        String body = index < tokens.length ? String.join(" ", List.of(tokens).subList(index, tokens.length)) : "";
+        return body.isBlank() ? header.toString() : header + " " + normalizeInline(body);
     }
 
     private static String joinNormalized(String raw, String regex, String separator) {

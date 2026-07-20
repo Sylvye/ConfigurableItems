@@ -363,13 +363,14 @@ Runs the nested action for the nearest nearby living non-player mob.
 MOB_NEAREST 12 BURN 4
 ```
 
-### `HITSCAN <distance> <action...>`
+### `HITSCAN <distance> [target:ANY|PLAYER|MOB] [max-hits:<n>|max-hits:all] [particle:<type>] [points:<n>] [offset:<value>] [speed:<value>] <action...>`
 
-Looks along `{SELF}`'s view direction. It targets the first living entity found near the ray. If no entity is found, it targets the first exact block in range. If neither exists, the action is skipped and a warning is logged.
+Looks along `{SELF}`'s view direction. By default, it targets the first living entity found near the ray. If no entity is found, `target:ANY` targets the first exact block in range. `target:PLAYER` only selects players, and `target:MOB` only selects living non-player mobs. Use `max-hits` to run the nested action for multiple matching entities in nearest-first order. If `particle` is set, ConfigurableItems draws a trail along the ray.
 
 ```text
 HITSCAN 32 DAMAGE 5
 HITSCAN 32 SET_TEMP_BLOCK GLOWSTONE 60
+HITSCAN 32 target:PLAYER max-hits:all particle:CRIT points:24 ACTIONBAR &cMarked
 ```
 
 ## Entity And Player Actions

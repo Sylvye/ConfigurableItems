@@ -21,7 +21,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
-import org.bukkit.Registry;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
@@ -234,56 +233,93 @@ public final class ActionEngine {
     }
 
     private void runHitscan(ActionExecutionContext context, List<String> tokens, String line) {
-        int distance = Math.max(1, intArg(tokens, 1, 32));
-        if (distance > config.warnHitscanDistance()) {
-            warn(context.triggerContext(), "HITSCAN distance " + distance + " exceeds warning threshold " + config.warnHitscanDistance());
+        HitscanOptions options = HitscanOptions.parse(tokens);
+        for (String error : options.errors()) {
+            warn(context.triggerContext(), error);
         }
-        String body = bodyAfter(tokens, 2);
-        if (body.isBlank()) {
-            warn(context.triggerContext(), "HITSCAN is missing an action body");
+        if (options.distance() > config.warnHitscanDistance()) {
+            warn(context.triggerContext(), "HITSCAN distance " + options.distance() + " exceeds warning threshold " + config.warnHitscanDistance());
+        }
+        if (options.body().isBlank()) {
             return;
         }
-        ActionExecutionContext scoped = context.copy();
-        Entity entity = rayEntity(context.self(), distance, context.target());
-        if (entity != null) {
-            scoped.target(entity);
-        } else {
-            Block block = context.self().getTargetBlockExact(distance);
-            if (block != null) {
-                scoped.block(block);
-                scoped.clearTarget();
-            } else {
-                return;
+        Particle particle = null;
+        if (!options.particle().isBlank()) {
+            particle = HitscanOptions.particleType(options.particle());
+            if (particle == null) {
+                warn(context.triggerContext(), "Unknown HITSCAN particle: " + options.particle());
             }
         }
-        ActionParser.splitInline(body).forEach(part -> runSimple(scoped, part));
+        List<RayHit> hits = rayEntities(context.self(), options.distance(), context.target(), options.targetMode());
+        int selectedCount = options.allHits() ? hits.size() : Math.min(options.maxHits(), hits.size());
+        Location particleEnd = context.self().getEyeLocation().clone().add(context.self().getEyeLocation().getDirection().normalize().multiply(options.distance()));
+        if (selectedCount > 0) {
+            particleEnd = hits.get(selectedCount - 1).location();
+            for (int i = 0; i < selectedCount; i++) {
+                ActionExecutionContext scoped = context.copy();
+                scoped.target(hits.get(i).entity());
+                ActionParser.splitInline(options.body()).forEach(part -> runSimple(scoped, part));
+            }
+        } else if (options.targetMode() == HitscanOptions.TargetMode.ANY) {
+            Block block = context.self().getTargetBlockExact(options.distance());
+            if (block != null) {
+                particleEnd = block.getLocation().add(0.5, 0.5, 0.5);
+                ActionExecutionContext scoped = context.copy();
+                scoped.block(block);
+                scoped.clearTarget();
+                ActionParser.splitInline(options.body()).forEach(part -> runSimple(scoped, part));
+            }
+        }
+        if (particle != null) {
+            drawParticleRay(context.self().getEyeLocation(), particleEnd, particle, options.points(), options.offset(), options.speed());
+        }
     }
 
-    private Entity rayEntity(Player player, int distance, Entity excludedSource) {
+    private List<RayHit> rayEntities(Player player, int distance, Entity excludedSource, HitscanOptions.TargetMode targetMode) {
         Location eye = player.getEyeLocation();
         Vector direction = eye.getDirection().normalize();
-        Entity best = null;
-        double bestProjection = Double.MAX_VALUE;
+        List<RayHit> hits = new ArrayList<>();
         for (Entity entity : player.getNearbyEntities(distance, distance, distance)) {
-            if (!(entity instanceof LivingEntity) || sameEntity(entity, player) || sameEntity(entity, excludedSource)) {
+            if (!matchesHitscanTarget(entity, targetMode) || sameEntity(entity, player) || sameEntity(entity, excludedSource)) {
                 continue;
             }
-            Vector toEntity = entity.getLocation().add(0, entity.getHeight() / 2.0, 0).toVector().subtract(eye.toVector());
+            Location hitLocation = entity.getLocation().add(0, entity.getHeight() / 2.0, 0);
+            Vector toEntity = hitLocation.toVector().subtract(eye.toVector());
             double projection = toEntity.dot(direction);
             if (projection < 0 || projection > distance) {
                 continue;
             }
             double perpendicular = toEntity.clone().subtract(direction.clone().multiply(projection)).length();
-            if (perpendicular <= 1.2 && projection < bestProjection) {
-                bestProjection = projection;
-                best = entity;
+            if (perpendicular <= 1.2) {
+                hits.add(new RayHit(entity, hitLocation, projection));
             }
         }
-        return best;
+        return hits.stream().sorted(Comparator.comparingDouble(RayHit::projection)).toList();
+    }
+
+    private boolean matchesHitscanTarget(Entity entity, HitscanOptions.TargetMode targetMode) {
+        return switch (targetMode) {
+            case ANY -> entity instanceof LivingEntity;
+            case PLAYER -> entity instanceof Player;
+            case MOB -> entity instanceof LivingEntity && !(entity instanceof Player);
+        };
+    }
+
+    private void drawParticleRay(Location start, Location end, Particle particle, int points, double offset, double speed) {
+        int safePoints = Math.max(1, points);
+        Vector direction = end.toVector().subtract(start.toVector());
+        double step = safePoints == 1 ? 0.0 : 1.0 / (safePoints - 1);
+        for (int i = 0; i < safePoints; i++) {
+            Location point = start.clone().add(direction.clone().multiply(step * i));
+            point.getWorld().spawnParticle(particle, point, 1, offset, offset, offset, speed);
+        }
     }
 
     static boolean sameEntity(Entity first, Entity second) {
         return first != null && second != null && (first == second || first.equals(second) || first.getUniqueId().equals(second.getUniqueId()));
+    }
+
+    private record RayHit(Entity entity, Location location, double projection) {
     }
 
     private void heal(ActionExecutionContext context, double amount) {
@@ -345,7 +381,7 @@ public final class ActionEngine {
             warn(context.triggerContext(), "PARTICLE requires type and count");
             return;
         }
-        Particle particle = Registry.PARTICLE_TYPE.match(tokens.get(1));
+        Particle particle = HitscanOptions.particleType(tokens.get(1));
         if (particle == null) {
             warn(context.triggerContext(), "Unknown particle: " + tokens.get(1));
             return;
@@ -361,7 +397,7 @@ public final class ActionEngine {
             warn(context.triggerContext(), "PARTICLE_LINE requires type, distance, and points");
             return;
         }
-        Particle particle = Registry.PARTICLE_TYPE.match(tokens.get(1));
+        Particle particle = HitscanOptions.particleType(tokens.get(1));
         if (particle == null) {
             warn(context.triggerContext(), "Unknown particle: " + tokens.get(1));
             return;

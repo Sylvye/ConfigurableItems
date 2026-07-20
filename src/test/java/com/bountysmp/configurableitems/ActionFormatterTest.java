@@ -11,6 +11,7 @@ final class ActionFormatterTest {
     void normalizesActionNamesAndVariables() {
         assertEquals("DAMAGE {SELF}", ActionFormatter.normalizeLine("damage {self}"));
         assertEquals("HITSCAN 24 DAMAGE {TARGET} <+> PARTICLE flame 10", ActionFormatter.normalizeLine("hitscan 24 damage {Target} <+> particle flame 10"));
+        assertEquals("HITSCAN 24 target:PLAYER max-hits:all particle:FLAME points:8 DAMAGE 3", ActionFormatter.normalizeLine("hitscan 24 target:player max-hits:ALL particle:flame points:8 damage 3"));
     }
 
     @Test
