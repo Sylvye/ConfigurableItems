@@ -4,6 +4,8 @@ import com.bountysmp.configurableitems.action.ActionFormatter;
 import com.bountysmp.configurableitems.action.ActionParser;
 import com.bountysmp.configurableitems.action.ActionValidator;
 import com.bountysmp.configurableitems.action.HitscanOptions;
+import com.bountysmp.configurableitems.action.ProjectileTrailOptions;
+import com.bountysmp.configurableitems.action.VeinmineOptions;
 import com.bountysmp.configurableitems.item.ItemFactory;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
@@ -457,6 +459,16 @@ public final class GuiManager implements Listener {
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
+        if (param.kind() == ParamKind.VEINMINE_MODE) {
+            draft.put(param.key(), next(draft.value(param.key()), "DESTROY", "REPLACE"));
+            openActionEditor(player, item, type, editIndex, draft, cancel);
+            return;
+        }
+        if (param.kind() == ParamKind.VEINMINE_MATCH) {
+            draft.put(param.key(), next(draft.value(param.key()), "ALL", "SAME_TYPE"));
+            openActionEditor(player, item, type, editIndex, draft, cancel);
+            return;
+        }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             draft.put(param.key(), value);
@@ -571,6 +583,16 @@ public final class GuiManager implements Listener {
             openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
             return;
         }
+        if (param.kind() == ParamKind.VEINMINE_MODE) {
+            nested.put(param.key(), next(nested.value(param.key()), "DESTROY", "REPLACE"));
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
+        if (param.kind() == ParamKind.VEINMINE_MATCH) {
+            nested.put(param.key(), next(nested.value(param.key()), "ALL", "SAME_TYPE"));
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            return;
+        }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             nested.put(param.key(), value);
@@ -670,6 +692,17 @@ public final class GuiManager implements Listener {
                 draft.body().clear();
                 draft.body().addAll(ActionParser.splitInline(options.body()));
             }
+            case "PROJECTILE_TRAIL" -> {
+                ProjectileTrailOptions options = ProjectileTrailOptions.parse(tokens);
+                draft.put("particle", options.particle());
+                draft.put("count", String.valueOf(options.count()));
+                draft.put("points", String.valueOf(options.points()));
+                draft.put("interval", String.valueOf(options.interval()));
+                draft.put("duration", String.valueOf(options.duration()));
+                draft.put("offset", String.valueOf(options.offset()));
+                draft.put("speed", String.valueOf(options.speed()));
+                replaceBody(draft, lines, 1, lines.size() - 1);
+            }
             case "DAMAGE", "SET_HEALTH" -> draft.put("amount", tokenOrKey(tokens, "amount", 1, draft.value("amount")));
             case "HEAL" -> draft.put("amount", tokenOrKey(tokens, "amount", 1, draft.value("amount")));
             case "BURN" -> draft.put("seconds", token(tokens, 1, draft.value("seconds")));
@@ -706,8 +739,17 @@ public final class GuiManager implements Listener {
                 draft.put("amount", token(tokens, 2, draft.value("amount")));
             }
             case "VEINMINE" -> {
-                draft.put("limit", token(tokens, 1, draft.value("limit")));
-                draft.put("drop", keyArg(tokens, "drop", draft.value("drop")));
+                VeinmineOptions options = VeinmineOptions.parse(tokens);
+                draft.put("limit", options.limit() == null ? draft.value("limit") : String.valueOf(options.limit()));
+                draft.put("drop", String.valueOf(options.drop()));
+                draft.put("filter", options.filter().raw());
+                draft.put("match", options.matchMode().name());
+                draft.put("mode", options.mode().name());
+                draft.put("replace", options.replacement() == null ? "" : options.replacement().name());
+                draft.put("useEnchants", String.valueOf(options.useEnchants()));
+                draft.put("useDurability", String.valueOf(options.useDurability()));
+                draft.put("effect", String.valueOf(options.effect()));
+                draft.put("xp", String.valueOf(options.xp()));
             }
             default -> {}
         }
@@ -751,15 +793,15 @@ public final class GuiManager implements Listener {
             return index;
         }
         String first = firstToken(commands.get(index).command()).toUpperCase(Locale.ROOT);
-        if (!first.equals("LOOP_START") && !first.equals("RANDOM_RUN") && !first.equals("FOR")) {
+        if (!first.equals("LOOP_START") && !first.equals("RANDOM_RUN") && !first.equals("FOR") && !first.equals("PROJECTILE_TRAIL")) {
             return index;
         }
         int depth = 0;
         for (int i = index; i < commands.size(); i++) {
             String token = firstToken(commands.get(i).command()).toUpperCase(Locale.ROOT);
-            if (token.equals("LOOP_START") || token.equals("RANDOM_RUN") || token.equals("FOR")) {
+            if (token.equals("LOOP_START") || token.equals("RANDOM_RUN") || token.equals("FOR") || token.equals("PROJECTILE_TRAIL")) {
                 depth++;
-            } else if (token.equals("LOOP_END") || token.equals("RANDOM_END") || token.equals("END_FOR") || token.equals("ENDFOR")) {
+            } else if (token.equals("LOOP_END") || token.equals("RANDOM_END") || token.equals("END_FOR") || token.equals("ENDFOR") || token.equals("END_PROJECTILE_TRAIL")) {
                 depth--;
                 if (depth <= 0) {
                     return i;
@@ -1084,11 +1126,29 @@ public final class GuiManager implements Listener {
             spec("ACTIONBAR", Material.OAK_SIGN, "Message", false, false, p("text", "Text", Material.OAK_SIGN, "Enter actionbar text", "&eReady", ParamKind.TEXT)),
             spec("PARTICLE", Material.BLAZE_POWDER, "Visual", false, false, p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle type", "FLAME", ParamKind.TEXT), p("count", "Count", Material.GUNPOWDER, "Enter count", "20", ParamKind.INTEGER), p("offset", "Offset", Material.SUGAR, "Enter offset", "0.2", ParamKind.DOUBLE), p("speed", "Speed", Material.FEATHER, "Enter speed", "0.01", ParamKind.DOUBLE)),
             spec("PARTICLE_LINE", Material.BLAZE_ROD, "Visual", false, false, p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle type", "FLAME", ParamKind.TEXT), p("distance", "Distance", Material.SPYGLASS, "Enter distance", "8", ParamKind.DOUBLE), p("points", "Points", Material.REPEATER, "Enter points", "24", ParamKind.INTEGER), p("offset", "Offset", Material.SUGAR, "Enter offset", "0", ParamKind.DOUBLE), p("speed", "Speed", Material.FEATHER, "Enter speed", "0", ParamKind.DOUBLE)),
+            spec("PROJECTILE_TRAIL", Material.FIREWORK_ROCKET, "Visual", true, true,
+                p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle, or clear", "FLAME", ParamKind.TEXT),
+                p("count", "Count", Material.GUNPOWDER, "Enter particle count", "1", ParamKind.INTEGER),
+                p("points", "Points", Material.REPEATER, "Enter interpolation points", "1", ParamKind.INTEGER),
+                p("interval", "Interval", Material.CLOCK, "Enter tick interval", "1", ParamKind.INTEGER),
+                p("duration", "Duration", Material.REDSTONE, "Enter max ticks", "100", ParamKind.INTEGER),
+                p("offset", "Offset", Material.SUGAR, "Enter particle offset", "0", ParamKind.DOUBLE),
+                p("speed", "Speed", Material.FEATHER, "Enter particle speed", "0", ParamKind.DOUBLE)),
             spec("SET_BLOCK", Material.STONE, "Block", false, false, p("material", "Material", Material.STONE, "Enter block material", "STONE", ParamKind.TEXT)),
             spec("SET_TEMP_BLOCK", Material.GLOWSTONE, "Block", false, false, p("material", "Material", Material.GLOWSTONE, "Enter block material", "GLOWSTONE", ParamKind.TEXT), p("ticks", "Ticks", Material.CLOCK, "Enter restore ticks", "100", ParamKind.INTEGER)),
             spec("BREAK_BLOCK", Material.IRON_PICKAXE, "Block", false, false, p("drop", "Drop Items", Material.CHEST, "Toggle drops", "true", ParamKind.BOOLEAN)),
             spec("DROPITEM", Material.DIAMOND, "Item", false, false, p("material", "Material", Material.DIAMOND, "Enter item material", "DIAMOND", ParamKind.TEXT), p("amount", "Amount", Material.CHEST, "Enter amount", "1", ParamKind.INTEGER)),
-            spec("VEINMINE", Material.DIAMOND_PICKAXE, "Block", false, false, p("limit", "Limit", Material.DIAMOND_PICKAXE, "Enter block limit", "64", ParamKind.INTEGER), p("drop", "Drop Items", Material.CHEST, "Toggle drops", "true", ParamKind.BOOLEAN))
+            spec("VEINMINE", Material.DIAMOND_PICKAXE, "Block", false, false,
+                p("limit", "Limit", Material.DIAMOND_PICKAXE, "Enter block limit", "64", ParamKind.INTEGER),
+                p("drop", "Drop Items", Material.CHEST, "Toggle drops", "true", ParamKind.BOOLEAN),
+                p("filter", "Filter", Material.HOPPER, "Enter material or #tag, or clear", "", ParamKind.TEXT),
+                p("match", "Match", Material.COMPASS, "Toggle filter matching", "SAME_TYPE", ParamKind.VEINMINE_MATCH),
+                p("mode", "Mode", Material.PISTON, "Toggle mode", "DESTROY", ParamKind.VEINMINE_MODE),
+                p("replace", "Replace Block", Material.STONE, "Enter replace block, or clear", "", ParamKind.TEXT),
+                p("useEnchants", "Use Enchants", Material.ENCHANTED_BOOK, "Toggle enchant use", "true", ParamKind.BOOLEAN),
+                p("useDurability", "Use Durability", Material.ANVIL, "Toggle durability use", "true", ParamKind.BOOLEAN),
+                p("effect", "Break Effect", Material.FIREWORK_STAR, "Toggle break effects", "true", ParamKind.BOOLEAN),
+                p("xp", "Drop XP", Material.EXPERIENCE_BOTTLE, "Toggle XP drops", "true", ParamKind.BOOLEAN))
         );
     }
 
@@ -1410,7 +1470,9 @@ public final class GuiManager implements Listener {
         BOOLEAN,
         VARIABLE,
         TARGET_MODE,
-        HITSCAN_TARGET
+        HITSCAN_TARGET,
+        VEINMINE_MODE,
+        VEINMINE_MATCH
     }
 
     private record ActionParam(String key, String label, Material icon, String prompt, String defaultValue, ParamKind kind) {
@@ -1476,11 +1538,12 @@ public final class GuiManager implements Listener {
                 case "SEND_MESSAGE", "ACTIONBAR" -> List.of(join(name, value("text")));
                 case "PARTICLE" -> List.of(join(name, value("particle").toUpperCase(Locale.ROOT), value("count"), value("offset"), value("speed")));
                 case "PARTICLE_LINE" -> List.of(join(name, value("particle").toUpperCase(Locale.ROOT), value("distance"), value("points"), value("offset"), value("speed")));
+                case "PROJECTILE_TRAIL" -> block(formatProjectileTrail(), "END_PROJECTILE_TRAIL");
                 case "SET_BLOCK" -> List.of(join(name, value("material").toUpperCase(Locale.ROOT)));
                 case "SET_TEMP_BLOCK" -> List.of(join(name, value("material").toUpperCase(Locale.ROOT), value("ticks")));
                 case "BREAK_BLOCK" -> List.of(name + " drop:" + value("drop").toLowerCase(Locale.ROOT));
                 case "DROPITEM" -> List.of(join(name, value("material").toUpperCase(Locale.ROOT), value("amount")));
-                case "VEINMINE" -> List.of(join(name, value("limit"), "drop:" + value("drop").toLowerCase(Locale.ROOT)));
+                case "VEINMINE" -> List.of(formatVeinmine());
                 default -> List.of(name);
             };
         }
@@ -1512,6 +1575,41 @@ public final class GuiManager implements Listener {
             return join(parts.toArray(String[]::new));
         }
 
+        private String formatVeinmine() {
+            List<String> parts = new ArrayList<>();
+            parts.add("VEINMINE");
+            parts.add(value("limit"));
+            parts.add("drop:" + value("drop").toLowerCase(Locale.ROOT));
+            if (!value("filter").isBlank()) {
+                parts.add("filter:" + value("filter"));
+            }
+            parts.add("match:" + value("match").toLowerCase(Locale.ROOT).replace('_', '-'));
+            parts.add("mode:" + value("mode").toLowerCase(Locale.ROOT));
+            if (value("mode").equalsIgnoreCase("REPLACE") && !value("replace").isBlank()) {
+                parts.add("replace:" + value("replace").toUpperCase(Locale.ROOT));
+            }
+            parts.add("use-enchants:" + value("useEnchants").toLowerCase(Locale.ROOT));
+            parts.add("use-durability:" + value("useDurability").toLowerCase(Locale.ROOT));
+            parts.add("effect:" + value("effect").toLowerCase(Locale.ROOT));
+            parts.add("xp:" + value("xp").toLowerCase(Locale.ROOT));
+            return join(parts.toArray(String[]::new));
+        }
+
+        private String formatProjectileTrail() {
+            List<String> parts = new ArrayList<>();
+            parts.add("PROJECTILE_TRAIL");
+            if (!value("particle").isBlank()) {
+                parts.add("particle:" + value("particle").toUpperCase(Locale.ROOT));
+            }
+            parts.add("count:" + value("count"));
+            parts.add("points:" + value("points"));
+            parts.add("interval:" + value("interval"));
+            parts.add("duration:" + value("duration"));
+            parts.add("offset:" + value("offset"));
+            parts.add("speed:" + value("speed"));
+            return join(parts.toArray(String[]::new));
+        }
+
         private List<String> block(String header, String terminator) {
             List<String> lines = new ArrayList<>();
             lines.add(header);
@@ -1531,6 +1629,7 @@ public final class GuiManager implements Listener {
                 case "LOOP_START" -> "PARTICLE CRIT 15 0.2 0.01";
                 case "RANDOM_RUN" -> "SEND_MESSAGE &aOption";
                 case "FOR" -> "SEND_MESSAGE &e{VALUE}";
+                case "PROJECTILE_TRAIL" -> "PARTICLE CRIT 2 0.05 0";
                 default -> "";
             };
         }

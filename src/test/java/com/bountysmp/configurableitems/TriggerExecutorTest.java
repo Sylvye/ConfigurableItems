@@ -36,4 +36,15 @@ final class TriggerExecutorTest {
         assertTrue(TriggerExecutor.invalidVariable(commands, TriggerType.RIGHT_CLICK).isEmpty());
         assertEquals("COLOR", TriggerExecutor.invalidVariable("SEND_MESSAGE {COLOR}", TriggerType.RIGHT_CLICK).orElseThrow());
     }
+
+    @Test
+    void allowsUppercaseNumericForVariablesOnlyInsideDeclaredScope() {
+        List<CustomItemDefinition.TriggerCommandDef> commands = List.of(
+            new CustomItemDefinition.TriggerCommandDef("FOR [X=0.5;1;3]"),
+            new CustomItemDefinition.TriggerCommandDef("SEND_MESSAGE {X}"),
+            new CustomItemDefinition.TriggerCommandDef("END_FOR X")
+        );
+
+        assertTrue(TriggerExecutor.invalidVariable(commands, TriggerType.RIGHT_CLICK).isEmpty());
+    }
 }

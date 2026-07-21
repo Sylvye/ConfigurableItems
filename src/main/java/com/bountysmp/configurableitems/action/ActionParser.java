@@ -4,8 +4,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class ActionParser {
+    private static final Pattern NUMERIC_FOR = Pattern.compile("^\\s*([A-Za-z0-9_]+)\\s*=\\s*([^;]+)\\s*;\\s*([^;]+)\\s*;\\s*([^;]+)\\s*$");
+
     private ActionParser() {
     }
 
@@ -74,6 +78,10 @@ public final class ActionParser {
                     steps.add(parseFor(raw));
                     continue;
                 }
+                if (upper.startsWith("PROJECTILE_TRAIL")) {
+                    steps.add(parseProjectileTrail(raw));
+                    continue;
+                }
                 if (hasNestedInlineBody(upper)) {
                     steps.add(new ActionStep.Simple(raw));
                     index++;
@@ -114,20 +122,59 @@ public final class ActionParser {
             int start = raw.indexOf('[');
             int end = raw.indexOf(']');
             int arrow = raw.indexOf('>', end);
-            if (start < 0 || end < start || arrow < 0) {
+            if (start < 0 || end < start) {
                 errors.add("Malformed FOR block: " + raw);
                 return new ActionStep.ForBlock(List.of(), "for", parseUntil("END_FOR"));
             }
-            List<String> values = Arrays.stream(raw.substring(start + 1, end).split(","))
+            String spec = raw.substring(start + 1, end).trim();
+            ForSpec parsed = parseForSpec(spec, arrow < 0 ? "" : raw.substring(arrow + 1).trim(), raw);
+            return new ActionStep.ForBlock(parsed.values(), parsed.variable(), parseUntil("END_FOR " + parsed.variable()));
+        }
+
+        private ActionStep parseProjectileTrail(String raw) {
+            index++;
+            return new ActionStep.ProjectileTrail(raw, parseUntil("END_PROJECTILE_TRAIL"));
+        }
+
+        private ForSpec parseForSpec(String spec, String arrowVariable, String raw) {
+            Matcher numeric = NUMERIC_FOR.matcher(spec);
+            if (numeric.matches()) {
+                String variable = numeric.group(1).trim();
+                List<String> values = numericValues(numeric.group(2), numeric.group(3), numeric.group(4), raw);
+                if (!arrowVariable.isBlank() && !arrowVariable.equalsIgnoreCase(variable)) {
+                    errors.add("FOR variable mismatch: " + raw);
+                }
+                return new ForSpec(values, variable);
+            }
+            if (arrowVariable.isBlank()) {
+                errors.add("Malformed FOR block: " + raw);
+                return new ForSpec(List.of(), "for");
+            }
+            List<String> values = Arrays.stream(spec.split(","))
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .toList();
-            String variable = raw.substring(arrow + 1).trim();
+            String variable = arrowVariable;
             if (variable.isBlank()) {
                 variable = "for";
                 errors.add("Missing FOR variable: " + raw);
             }
-            return new ActionStep.ForBlock(values, variable, parseUntil("END_FOR " + variable));
+            return new ForSpec(values, variable);
+        }
+
+        private List<String> numericValues(String rawStart, String rawStep, String rawCount, String source) {
+            double start = doubleArg(rawStart, 0.0, source);
+            double step = doubleArg(rawStep, 0.0, source);
+            int count = intArg(rawCount, 0, source);
+            if (count < 0) {
+                errors.add("FOR count must be non-negative in: " + source);
+                count = 0;
+            }
+            List<String> values = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                values.add(formatNumber(start + step * i));
+            }
+            return values;
         }
 
         private int intArg(String raw, int fallback, String source) {
@@ -139,8 +186,24 @@ public final class ActionParser {
             }
         }
 
+        private double doubleArg(String raw, double fallback, String source) {
+            try {
+                return Double.parseDouble(raw.trim());
+            } catch (NumberFormatException ex) {
+                errors.add("Malformed number '" + raw + "' in: " + source);
+                return fallback;
+            }
+        }
+
+        private String formatNumber(double value) {
+            if (Double.isFinite(value) && value == Math.rint(value)) {
+                return String.valueOf((long) value);
+            }
+            return String.valueOf(value);
+        }
+
         private boolean isTerminator(String upper) {
-            return upper.equals("LOOP_END") || upper.equals("RANDOM_END") || upper.startsWith("END_FOR");
+            return upper.equals("LOOP_END") || upper.equals("RANDOM_END") || upper.startsWith("END_FOR") || upper.equals("END_PROJECTILE_TRAIL");
         }
 
         private boolean matchesTerminator(String upper, String terminator) {
@@ -158,6 +221,9 @@ public final class ActionParser {
                 || upper.startsWith("NEAREST ")
                 || upper.startsWith("MOB_NEAREST ")
                 || upper.startsWith("HITSCAN ");
+        }
+
+        private record ForSpec(List<String> values, String variable) {
         }
     }
 }

@@ -10,17 +10,22 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
+import org.bukkit.Effect;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
+import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
@@ -28,13 +33,14 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 public final class ActionEngine {
     private static final Set<String> ACTIONS = Set.of(
         "DELAY_TICK", "IF", "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN",
         "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DASH",
-        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
+        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "PROJECTILE_TRAIL", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
     );
 
     private final Plugin plugin;
@@ -111,6 +117,8 @@ public final class ActionEngine {
                     expanded.addAll(forBlock.body());
                 }
                 prepend(queue, expanded);
+            } else if (step instanceof ActionStep.ProjectileTrail projectileTrail) {
+                startProjectileTrail(context, projectileTrail);
             }
         }
     }
@@ -424,6 +432,57 @@ public final class ActionEngine {
         }
     }
 
+    private void startProjectileTrail(ActionExecutionContext context, ActionStep.ProjectileTrail trail) {
+        Entity projectile = context.triggerContext().projectile();
+        if (projectile == null) {
+            warn(context.triggerContext(), "PROJECTILE_TRAIL requires a projectile context");
+            return;
+        }
+        ProjectileTrailOptions options = ProjectileTrailOptions.parse(tokens(trail.header()));
+        if (!options.errors().isEmpty()) {
+            options.errors().forEach(error -> warn(context.triggerContext(), error));
+            return;
+        }
+        Particle particle = options.particle().isBlank() ? null : ProjectileTrailOptions.particleType(options.particle());
+        Location initial = projectile.getLocation().clone();
+        new BukkitRunnable() {
+            private int elapsed;
+            private Location previous = initial;
+
+            @Override
+            public void run() {
+                if (!context.self().isOnline()
+                    || repository.get(context.triggerContext().itemId()) == null
+                    || !projectile.isValid()
+                    || projectile.isDead()
+                    || projectile.isOnGround()
+                    || elapsed >= options.duration()) {
+                    cancel();
+                    return;
+                }
+                Location current = projectile.getLocation().clone();
+                if (particle != null) {
+                    drawParticleTrail(previous, current, particle, options.count(), options.points(), options.offset(), options.speed());
+                }
+                ActionExecutionContext scoped = context.copy();
+                scoped.location(current);
+                runQueue(scoped, new ArrayDeque<>(trail.body()));
+                previous = current;
+                elapsed += options.interval();
+            }
+        }.runTaskTimer(plugin, options.interval(), options.interval());
+    }
+
+    private void drawParticleTrail(Location previous, Location current, Particle particle, int count, int points, double offset, double speed) {
+        int safePoints = Math.max(1, points);
+        Vector direction = current.toVector().subtract(previous.toVector());
+        double step = safePoints == 1 ? 1.0 : 1.0 / (safePoints - 1);
+        for (int i = 0; i < safePoints; i++) {
+            Location point = previous.clone().add(direction.clone().multiply(step * i));
+            point.getWorld().spawnParticle(particle, point, count, offset, offset, offset, speed);
+        }
+    }
+
     private void setBlock(ActionExecutionContext context, List<String> tokens) {
         Block block = blockOrTarget(context);
         if (block == null || tokens.size() < 2) {
@@ -475,16 +534,31 @@ public final class ActionEngine {
     }
 
     private void veinmine(ActionExecutionContext context, List<String> tokens) {
+        VeinmineOptions options = VeinmineOptions.parse(tokens);
+        if (!options.errors().isEmpty()) {
+            options.errors().forEach(error -> warn(context.triggerContext(), error));
+            return;
+        }
         Block start = blockOrTarget(context);
         if (start == null || start.getType().isAir()) {
             warn(context.triggerContext(), "VEINMINE requires a non-air block");
             return;
         }
-        int limit = Math.max(1, intArg(tokens, 1, config.warnVeinmineBlocks()));
+        Map<NamespacedKey, Tag<Material>> tags = new HashMap<>();
+        for (VeinmineOptions.FilterEntry entry : options.filter().entries()) {
+            if (entry.kind() == VeinmineOptions.FilterKind.TAG) {
+                Tag<Material> tag = Bukkit.getTag(Tag.REGISTRY_BLOCKS, entry.tagKey(), Material.class);
+                if (tag == null) {
+                    warn(context.triggerContext(), "Unknown VEINMINE block tag: #" + entry.tagKey());
+                    return;
+                }
+                tags.put(entry.tagKey(), tag);
+            }
+        }
+        int limit = options.effectiveLimit(config.warnVeinmineBlocks());
         if (limit > config.warnVeinmineBlocks()) {
             warn(context.triggerContext(), "VEINMINE limit " + limit + " exceeds warning threshold " + config.warnVeinmineBlocks());
         }
-        boolean drop = booleanArg(tokens, "drop", true);
         Material type = start.getType();
         Set<String> visited = new HashSet<>();
         Deque<Block> queue = new ArrayDeque<>();
@@ -493,13 +567,13 @@ public final class ActionEngine {
         while (!queue.isEmpty() && broken < limit) {
             Block block = queue.removeFirst();
             String key = block.getWorld().getName() + ":" + block.getX() + ":" + block.getY() + ":" + block.getZ();
-            if (!visited.add(key) || block.getType() != type) {
+            if (!visited.add(key) || !matchesVeinmineFilter(block.getType(), type, options, tags)) {
                 continue;
             }
-            if (drop) {
-                block.breakNaturally(context.self().getInventory().getItemInMainHand());
+            if (options.mode() == VeinmineOptions.Mode.REPLACE) {
+                block.setType(options.replacement());
             } else {
-                block.setType(Material.AIR);
+                destroyVeinmineBlock(context, block, options);
             }
             broken++;
             for (int x = -1; x <= 1; x++) {
@@ -512,6 +586,53 @@ public final class ActionEngine {
                 }
             }
         }
+    }
+
+    private boolean matchesVeinmineFilter(Material material, Material startType, VeinmineOptions options, Map<NamespacedKey, Tag<Material>> tags) {
+        boolean filterMatch = switch (options.filter().kind()) {
+            case SAME_TYPE -> material == startType;
+            case MATERIAL -> material == options.filter().material();
+            case TAG -> matchesVeinmineEntry(material, options.filter().entries().getFirst(), tags);
+            case MULTI -> options.filter().entries().stream().anyMatch(entry -> matchesVeinmineEntry(material, entry, tags));
+        };
+        return options.matchMode() == VeinmineOptions.MatchMode.SAME_TYPE
+            ? filterMatch && material == startType
+            : filterMatch;
+    }
+
+    private boolean matchesVeinmineEntry(Material material, VeinmineOptions.FilterEntry entry, Map<NamespacedKey, Tag<Material>> tags) {
+        return switch (entry.kind()) {
+            case MATERIAL -> material == entry.material();
+            case TAG -> Optional.ofNullable(tags.get(entry.tagKey())).map(tag -> tag.isTagged(material)).orElse(false);
+            case SAME_TYPE, MULTI -> false;
+        };
+    }
+
+    private void destroyVeinmineBlock(ActionExecutionContext context, Block block, VeinmineOptions options) {
+        if (options.drop()) {
+            if (options.useEnchants()) {
+                block.breakNaturally(context.self().getInventory().getItemInMainHand(), options.effect(), options.xp());
+            } else {
+                block.breakNaturally(options.effect(), options.xp());
+            }
+        } else {
+            if (options.effect()) {
+                block.getWorld().playEffect(block.getLocation(), Effect.STEP_SOUND, block.getType());
+            }
+            block.setType(Material.AIR);
+        }
+        if (options.useDurability()) {
+            damageHeldTool(context.self());
+        }
+    }
+
+    private void damageHeldTool(Player player) {
+        ItemStack tool = player.getInventory().getItemInMainHand();
+        Material type = tool.getType();
+        if (type == Material.AIR || type == Material.CAVE_AIR || type == Material.VOID_AIR || type.getMaxDurability() <= 0) {
+            return;
+        }
+        player.getInventory().setItemInMainHand(tool.damage(1, player));
     }
 
     private Block blockOrTarget(ActionExecutionContext context) {

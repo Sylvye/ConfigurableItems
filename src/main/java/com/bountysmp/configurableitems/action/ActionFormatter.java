@@ -10,13 +10,15 @@ import java.util.regex.Pattern;
 public final class ActionFormatter {
     private static final Pattern VARIABLE = Pattern.compile("\\{([A-Za-z0-9_]+)}");
     private static final Pattern FOR_HEADER = Pattern.compile("(?i)^FOR\\s+\\[([^]]*)]\\s*>\\s*([A-Za-z0-9_]+)\\s*$");
+    private static final Pattern NUMERIC_FOR_HEADER = Pattern.compile("(?i)^FOR\\s+\\[\\s*([A-Za-z0-9_]+)\\s*=\\s*([^;]+)\\s*;\\s*([^;]+)\\s*;\\s*([^;]+)\\s*]\\s*$");
     private static final Pattern END_FOR = Pattern.compile("(?i)^END_?FOR\\s+([A-Za-z0-9_]+)\\s*$");
 
     public static final Set<String> ACTION_NAMES = Set.of(
         "DELAY_TICK", "IF", "LOOP_START", "LOOP_END", "RANDOM_RUN", "RANDOM_END", "FOR", "END_FOR",
         "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN",
         "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DASH",
-        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
+        "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "PROJECTILE_TRAIL", "END_PROJECTILE_TRAIL",
+        "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
     );
 
     public static final Set<String> ENTITY_ACTION_NAMES = Set.of(
@@ -49,6 +51,14 @@ public final class ActionFormatter {
         if (forMatcher.matches()) {
             return "FOR [" + forMatcher.group(1).trim() + "] > " + forMatcher.group(2).toUpperCase(Locale.ROOT);
         }
+        Matcher numericForMatcher = NUMERIC_FOR_HEADER.matcher(line);
+        if (numericForMatcher.matches()) {
+            return "FOR [" + numericForMatcher.group(1).toUpperCase(Locale.ROOT)
+                + "=" + numericForMatcher.group(2).trim()
+                + ";" + numericForMatcher.group(3).trim()
+                + ";" + numericForMatcher.group(4).trim()
+                + "]";
+        }
         Matcher endForMatcher = END_FOR.matcher(line);
         if (endForMatcher.matches()) {
             return "END_FOR " + endForMatcher.group(1).toUpperCase(Locale.ROOT);
@@ -68,6 +78,12 @@ public final class ActionFormatter {
         }
         if (first.equals("HITSCAN")) {
             return normalizeHitscan(first, rest);
+        }
+        if (first.equals("VEINMINE")) {
+            return normalizeVeinmine(first, rest);
+        }
+        if (first.equals("PROJECTILE_TRAIL")) {
+            return normalizeProjectileTrail(first, rest);
         }
         if (Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST").contains(first)) {
             String[] selectorParts = rest.split("\\s+", 2);
@@ -129,6 +145,70 @@ public final class ActionFormatter {
         }
         String body = index < tokens.length ? String.join(" ", List.of(tokens).subList(index, tokens.length)) : "";
         return body.isBlank() ? header.toString() : header + " " + normalizeInline(body);
+    }
+
+    private static String normalizeVeinmine(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        int index = 0;
+        StringBuilder output = new StringBuilder(first);
+        if (index < tokens.length && !VeinmineOptions.isVeinmineOption(tokens[index])) {
+            output.append(' ').append(tokens[index]);
+            index++;
+        }
+        while (index < tokens.length) {
+            String token = tokens[index];
+            if (!VeinmineOptions.isVeinmineOption(token)) {
+                output.append(' ').append(token);
+                index++;
+                continue;
+            }
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            switch (key) {
+                case "drop", "use-enchants", "use-durability", "effect", "xp", "mode", "match" -> value = value.toLowerCase(Locale.ROOT);
+                case "filter" -> value = normalizeFilterValue(value);
+                case "replace" -> value = normalizeMaterialValue(value);
+                default -> {}
+            }
+            output.append(' ').append(key).append(':').append(value);
+            index++;
+        }
+        return output.toString();
+    }
+
+    private static String normalizeProjectileTrail(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        StringBuilder output = new StringBuilder(first);
+        for (String token : tokens) {
+            if (!ProjectileTrailOptions.isProjectileTrailOption(token)) {
+                output.append(' ').append(token);
+                continue;
+            }
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            if (key.equals("particle")) {
+                value = value.toUpperCase(Locale.ROOT);
+            }
+            output.append(' ').append(key).append(':').append(value);
+        }
+        return output.toString();
+    }
+
+    private static String normalizeFilterValue(String value) {
+        return String.join(",", Pattern.compile("\\s*,\\s*").splitAsStream(value)
+            .filter(entry -> !entry.isBlank())
+            .map(entry -> entry.startsWith("#") ? "#" + entry.substring(1).toLowerCase(Locale.ROOT) : normalizeMaterialValue(entry))
+            .toList());
+    }
+
+    private static String normalizeMaterialValue(String value) {
+        return value.contains(":") ? value.toLowerCase(Locale.ROOT) : value.toUpperCase(Locale.ROOT);
     }
 
     private static String joinNormalized(String raw, String regex, String separator) {

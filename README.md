@@ -315,7 +315,7 @@ SEND_MESSAGE &cRolled red
 RANDOM_END
 ```
 
-### `FOR [a,b,c] > var` / `END_FOR var`
+### `FOR [a,b,c] > var` / `FOR [var=start;step;count]` / `END_FOR var`
 
 Repeats the enclosed action lines once for each listed value.
 
@@ -323,6 +323,10 @@ Repeats the enclosed action lines once for each listed value.
 FOR [1,2,3] > step
 SEND_MESSAGE &eStep {step}
 END_FOR step
+
+FOR [x=0.5;1;4]
+SEND_MESSAGE &eX is {x}
+END_FOR x
 ```
 
 `ENDFOR var` is also accepted.
@@ -409,6 +413,7 @@ In a `HIT_PLAYER` trigger folder, `DAMAGE 4` damages the hit player because that
 | `ACTIONBAR <text>` | Sends an actionbar message to the current player target, or `{SELF}` if the target is not a player. Supports `&` color/style codes. |
 | `PARTICLE <type> <count> [offset] [speed]` | Spawns a Bukkit particle at the current action location. |
 | `PARTICLE_LINE <type> <distance> <points> [offset] [speed]` | Spawns one particle per point in a line from the current action location along the player's look direction. |
+| `PROJECTILE_TRAIL [particle:<type>] [count:<n>] [points:<n>] [interval:<ticks>] [duration:<ticks>] [offset:<value>] [speed:<value>]` / `END_PROJECTILE_TRAIL` | Runs nested actions at the current projectile location until the projectile stops or duration expires. Intended for `LAUNCH_PROJECTILE`. |
 
 Examples:
 
@@ -417,9 +422,15 @@ SEND_MESSAGE &aItem ready.
 ACTIONBAR &eCooldown complete
 PARTICLE FLAME 20 0.2 0.01
 PARTICLE_LINE FLAME 8 24 0 0
+PROJECTILE_TRAIL particle:FLAME points:3 interval:1 duration:100 offset:0 speed:0
+PARTICLE CRIT 2 0.05 0
+AROUND 1.5 DAMAGE 2
+END_PROJECTILE_TRAIL
 ```
 
 Particle types are validated against the Paper/Bukkit particle registry.
+
+`PROJECTILE_TRAIL` requires a projectile context, normally from a `LAUNCH_PROJECTILE` trigger. `interval` and `duration` default to `1` and `100` ticks. `particle` is optional; when set, `points` interpolates particles between the previous and current projectile locations to avoid visual gaps. Nested actions keep the original target unless they select a new one.
 
 ## Block And Item Actions
 
@@ -431,7 +442,7 @@ Block actions use the current context block when available. If no block is in co
 | `SET_TEMP_BLOCK <material> <ticks>` | Temporarily changes the current block, then restores its old material. |
 | `BREAK_BLOCK [drop:true|false]` | Breaks the current block. Defaults to dropping items. |
 | `DROPITEM <material> [amount]` | Drops an item at the current action location. |
-| `VEINMINE [limit] [drop:true|false]` | Breaks connected same-type blocks from the current block. Defaults limit to the configured veinmine warning threshold. |
+| `VEINMINE [limit] [drop:true|false] [filter:<material|#tag>[,<material|#tag>...]] [match:all|same-type] [mode:destroy|replace] [replace:<material>] [use-enchants:true|false] [use-durability:true|false] [effect:true|false] [xp:true|false]` | Breaks or replaces connected blocks from the current block. Defaults limit to the configured veinmine warning threshold. |
 
 Examples:
 
@@ -441,9 +452,15 @@ SET_TEMP_BLOCK GLOWSTONE 100
 BREAK_BLOCK drop:false
 DROPITEM DIAMOND 1
 VEINMINE 64 drop:true
+VEINMINE 128 filter:#minecraft:logs drop:true use-durability:false
+VEINMINE 128 filter:#minecraft:logs,#minecraft:leaves,minecraft:bee_nest drop:true
+VEINMINE 128 filter:#minecraft:logs,#minecraft:leaves match:same-type drop:true
+VEINMINE 64 filter:minecraft:diamond_ore mode:replace replace:STONE
 ```
 
-Material names are validated against Bukkit materials. Block-setting actions require block materials.
+Without `filter`, `VEINMINE` only affects connected blocks matching the starting block type. `filter:<material>` matches one block material. `filter:#<tag>` matches a Bukkit block tag. Separate multiple filter entries with commas to match any listed material or tag. With a filter, `match:all` is the default and mines every matching block in the filter; `match:same-type` only mines matching blocks with the same material as the starting block. `mode:destroy` is the default. `mode:replace` requires `replace:<material>` and ignores drop, enchant, durability, effect, and XP flags. Material names are validated against Bukkit materials. Block-setting actions require block materials.
+
+In destroy mode, `use-enchants:true` uses the held main-hand tool for natural drops, and `use-durability:true` damages that tool once per matched block. `effect` and `xp` are passed to natural block breaking when `drop:true`; with `drop:false`, blocks are removed directly and `effect:true` only plays a break visual.
 
 ## Practical Examples
 
@@ -601,6 +618,7 @@ SEND_MESSAGE
 ACTIONBAR
 PARTICLE
 PARTICLE_LINE
+PROJECTILE_TRAIL
 SET_BLOCK
 SET_TEMP_BLOCK
 BREAK_BLOCK

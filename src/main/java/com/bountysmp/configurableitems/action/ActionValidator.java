@@ -39,6 +39,13 @@ public final class ActionValidator {
         if (step instanceof ActionStep.ForBlock forBlock) {
             return invalidSteps(forBlock.body());
         }
+        if (step instanceof ActionStep.ProjectileTrail projectileTrail) {
+            ProjectileTrailOptions options = ProjectileTrailOptions.parse(tokens(projectileTrail.header()));
+            if (!options.errors().isEmpty()) {
+                return Optional.of(options.errors().getFirst());
+            }
+            return invalidSteps(projectileTrail.body());
+        }
         return Optional.empty();
     }
 
@@ -54,6 +61,12 @@ public final class ActionValidator {
                 return Optional.of(options.errors().getFirst());
             }
             return invalidInline(options.body());
+        }
+        if (action.equals("VEINMINE")) {
+            VeinmineOptions options = VeinmineOptions.parse(tokens);
+            if (!options.errors().isEmpty()) {
+                return Optional.of(options.errors().getFirst());
+            }
         }
         if (action.equals("IF")) {
             String[] pieces = restAfter(line, 1).split("\\s+", 2);

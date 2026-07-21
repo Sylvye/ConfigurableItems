@@ -222,10 +222,17 @@ public final class TriggerExecutor {
             return Optional.empty();
         }
         int arrow = raw.indexOf('>');
-        if (arrow < 0) {
+        if (arrow >= 0) {
+            String variable = raw.substring(arrow + 1).trim();
+            return variable.isBlank() ? Optional.empty() : Optional.of(variable.toUpperCase(Locale.ROOT));
+        }
+        int start = raw.indexOf('[');
+        int equals = raw.indexOf('=', start);
+        int semicolon = raw.indexOf(';', equals);
+        if (start < 0 || equals < start || semicolon < equals) {
             return Optional.empty();
         }
-        String variable = raw.substring(arrow + 1).trim();
+        String variable = raw.substring(start + 1, equals).trim();
         return variable.isBlank() ? Optional.empty() : Optional.of(variable.toUpperCase(Locale.ROOT));
     }
 

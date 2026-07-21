@@ -17,6 +17,7 @@ final class ActionParserTest {
         assertTrue(ActionEngine.isKnownActionName("DAMAGE"));
         assertTrue(ActionEngine.isKnownActionName("send_message"));
         assertTrue(ActionEngine.isKnownActionName("PARTICLE_LINE"));
+        assertTrue(ActionEngine.isKnownActionName("PROJECTILE_TRAIL"));
         assertFalse(ActionEngine.isKnownActionName("minecraft:give"));
     }
 
@@ -55,6 +56,29 @@ final class ActionParserTest {
     }
 
     @Test
+    void parsesProjectileTrailBlock() {
+        ActionParser.ParseResult result = ActionParser.parse(List.of(
+            "PROJECTILE_TRAIL particle:FLAME points:3 interval:1 duration:100",
+            "PARTICLE CRIT 2 0.05 0",
+            "AROUND 1.5 DAMAGE 2",
+            "END_PROJECTILE_TRAIL"
+        ));
+
+        assertTrue(result.ok());
+        ActionStep.ProjectileTrail trail = assertInstanceOf(ActionStep.ProjectileTrail.class, result.steps().getFirst());
+        assertEquals("PROJECTILE_TRAIL particle:FLAME points:3 interval:1 duration:100", trail.header());
+        assertEquals(2, trail.body().size());
+    }
+
+    @Test
+    void reportsMissingProjectileTrailTerminator() {
+        ActionParser.ParseResult result = ActionParser.parse(List.of("PROJECTILE_TRAIL particle:FLAME", "PARTICLE CRIT 1"));
+
+        assertFalse(result.ok());
+        assertTrue(result.errors().getFirst().contains("END_PROJECTILE_TRAIL"));
+    }
+
+    @Test
     void reportsMalformedBlocks() {
         ActionParser.ParseResult result = ActionParser.parse(List.of("LOOP_START 3", "SEND_MESSAGE test"));
 
@@ -74,5 +98,31 @@ final class ActionParserTest {
         ActionStep.ForBlock block = assertInstanceOf(ActionStep.ForBlock.class, result.steps().getFirst());
         assertEquals(List.of("a", "b", "c"), block.values());
         assertEquals("for1", block.variable());
+    }
+
+    @Test
+    void parsesNumericForBlock() {
+        ActionParser.ParseResult result = ActionParser.parse(List.of(
+            "FOR [x=0.5;1;4]",
+            "SEND_MESSAGE {x}",
+            "END_FOR x"
+        ));
+
+        assertTrue(result.ok());
+        ActionStep.ForBlock block = assertInstanceOf(ActionStep.ForBlock.class, result.steps().getFirst());
+        assertEquals(List.of("0.5", "1.5", "2.5", "3.5"), block.values());
+        assertEquals("x", block.variable());
+    }
+
+    @Test
+    void reportsMalformedNumericForBlock() {
+        ActionParser.ParseResult result = ActionParser.parse(List.of(
+            "FOR [x=bad;1;3]",
+            "SEND_MESSAGE {x}",
+            "END_FOR x"
+        ));
+
+        assertFalse(result.ok());
+        assertTrue(result.errors().getFirst().contains("Malformed number"));
     }
 }

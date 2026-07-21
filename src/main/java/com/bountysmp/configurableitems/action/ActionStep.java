@@ -2,7 +2,7 @@ package com.bountysmp.configurableitems.action;
 
 import java.util.List;
 
-public sealed interface ActionStep permits ActionStep.Simple, ActionStep.Loop, ActionStep.RandomBlock, ActionStep.ForBlock {
+public sealed interface ActionStep permits ActionStep.Simple, ActionStep.Loop, ActionStep.RandomBlock, ActionStep.ForBlock, ActionStep.ProjectileTrail {
     record Simple(String line) implements ActionStep {
     }
 
@@ -13,5 +13,8 @@ public sealed interface ActionStep permits ActionStep.Simple, ActionStep.Loop, A
     }
 
     record ForBlock(List<String> values, String variable, List<ActionStep> body) implements ActionStep {
+    }
+
+    record ProjectileTrail(String header, List<ActionStep> body) implements ActionStep {
     }
 }
