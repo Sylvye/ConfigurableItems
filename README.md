@@ -104,20 +104,24 @@ Do not include a leading `/` in console commands.
 
 Variables are written with curly braces. They are replaced before commands or actions run.
 
+Every trigger starts with a current context. At first, the context is usually `{SELF}`. Some triggers immediately add a target, block, or projectile. Selector actions, `HITSCAN`, block actions, and `PROJECTILE_TRAIL` can also move the current action context while nested actions run.
+
+`{WORLD}`, `{X}`, `{Y}`, and `{Z}` always describe the current action location. They start at `{SELF}`'s location, then move when the context moves to a target entity, clicked/broken/placed block, hitscan block, selector target, or projectile trail location.
+
 Base variables are available on every trigger:
 
 | Variable | Value |
 | --- | --- |
 | `{SELF}` | Player holding or using the item. |
 | `{SELF_UUID}` | UUID of `{SELF}`. |
-| `{WORLD}` | Current context world. Starts as self world. |
-| `{X}` | Current context block X coordinate. Starts as self X. |
-| `{Y}` | Current context block Y coordinate. Starts as self Y. |
-| `{Z}` | Current context block Z coordinate. Starts as self Z. |
+| `{WORLD}` | Current action context world. Starts as self world. |
+| `{X}` | Current action context block X coordinate. Starts as self X. |
+| `{Y}` | Current action context block Y coordinate. Starts as self Y. |
+| `{Z}` | Current action context block Z coordinate. Starts as self Z. |
 | `{ITEM_ID}` | ConfigurableItems YAML id. |
 | `{ITEM_NAME}` | Configured custom item name text. |
 
-Target variables are available when the trigger has an entity target, or inside selector actions after they choose a target:
+Target variables are available when the trigger starts with an entity target, or inside selector actions after they choose a target:
 
 | Variable | Value |
 | --- | --- |
@@ -145,6 +149,13 @@ FOR [red,green,blue] > color
 SEND_MESSAGE &eSelected {color}
 END_FOR color
 ```
+
+#### Which Variable Should I Use?
+
+- Use `RIGHT_CLICK_BLOCK` or `LEFT_CLICK_BLOCK` when you need `{BLOCK}` from a click. `RIGHT_CLICK` and `LEFT_CLICK` are broad click triggers and do not validate `{BLOCK}`.
+- Use `AROUND`, `NEAREST`, `MOB_AROUND`, `MOB_NEAREST`, or `HITSCAN` when a trigger does not start with a target but nested actions need `{TARGET}`.
+- Use `{PROJECTILE}` only in `LAUNCH_PROJECTILE`, `PROJECTILE_HIT_BLOCK`, `PROJECTILE_HIT_ENTITY`, and `PROJECTILE_HIT_PLAYER`.
+- Use `{WORLD}`, `{X}`, `{Y}`, and `{Z}` for the current action location. In nested selector or hitscan actions, that location may be the selected target or block instead of `{SELF}`.
 
 ### Trigger Reference
 
@@ -583,9 +594,10 @@ If a trigger does not fire:
 
 If a variable does not replace:
 
-- Confirm the trigger actually has that context. For example, `{TARGET}` is not available on `CONSUME`.
-- Use selector actions when you need to create a target from a non-target trigger.
-- Use lowercase or mixed-case names for `FOR` variables.
+- Check the trigger editor's Variables button. It groups the variables that can exist when that trigger starts.
+- If `{BLOCK}` is missing from a click trigger, use `RIGHT_CLICK_BLOCK` or `LEFT_CLICK_BLOCK`.
+- If `{TARGET}` is missing, use a target trigger or a selector action such as `AROUND`, `NEAREST`, or `HITSCAN`.
+- Keep `FOR` variables inside their matching `FOR` / `END_FOR` block.
 
 If an action runs as a console command:
 

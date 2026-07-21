@@ -329,12 +329,12 @@ public final class GuiManager implements Listener {
         Menu menu = new Menu("CI " + type.name());
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Command", "Console command without slash", e -> input(player, "Enter console command. Variables: " + TriggerExecutor.allowedVariables(type), raw -> {
+        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Command", "Console command without slash", e -> input(player, rawCommandPrompt(type, "Enter console command"), raw -> {
             String command = ActionFormatter.normalizeLine(raw.startsWith("/") ? raw.substring(1) : raw);
             item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(command));
             openTriggerCommands(player, item, type);
         }, () -> openTriggerCommands(player, item, type)));
-        button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", String.join(", ", TriggerExecutor.allowedVariables(type)));
+        button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", triggerVariableLore(type));
         button(menu, 12, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Add Action", "Choose a CI action", e -> openActionSelector(player, item, type, -1, 0, ""));
         int slot = 19;
         List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
@@ -367,7 +367,7 @@ public final class GuiManager implements Listener {
         String command = commands.get(index).command();
         String actionName = firstToken(command);
         if (!ActionFormatter.isKnownActionName(actionName)) {
-            input(player, "Edit console command", raw -> {
+            input(player, rawCommandPrompt(type, "Edit console command"), raw -> {
                 String normalized = ActionFormatter.normalizeLine(raw.startsWith("/") ? raw.substring(1) : raw);
                 commands.set(index, commands.get(index).withCommand(normalized));
                 openTriggerCommands(player, item, type);
@@ -376,7 +376,7 @@ public final class GuiManager implements Listener {
         }
         ActionSpec spec = actionSpec(actionName);
         if (spec == null) {
-            input(player, "Edit action line", raw -> {
+            input(player, rawCommandPrompt(type, "Edit action line"), raw -> {
                 commands.set(index, commands.get(index).withCommand(ActionFormatter.normalizeLine(raw)));
                 openTriggerCommands(player, item, type);
             }, () -> openTriggerCommands(player, item, type));
@@ -405,7 +405,7 @@ public final class GuiManager implements Listener {
             },
             () -> openTriggerCommands(player, item, type),
             null,
-            () -> input(player, "Enter custom CI action", raw -> {
+            () -> input(player, rawCommandPrompt(type, "Enter custom CI action"), raw -> {
                 String normalized = ActionFormatter.normalizeLine(raw);
                 if (editIndex >= 0) {
                     List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
@@ -485,7 +485,7 @@ public final class GuiManager implements Listener {
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Nested Action", "Choose a CI action", e -> openNestedActionSelector(player, item, type, editIndex, draft, cancel, backToAction, 0, ""));
-        button(menu, 11, Material.NAME_TAG, NamedTextColor.YELLOW, "Add Raw Line", "", e -> input(player, "Enter nested action or command", raw -> {
+        button(menu, 11, Material.NAME_TAG, NamedTextColor.YELLOW, "Add Raw Line", triggerContextSummary(type), e -> input(player, rawCommandPrompt(type, "Enter nested action or command"), raw -> {
             draft.body().add(ActionFormatter.normalizeLine(raw));
             openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction);
         }, () -> openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction)));
@@ -519,7 +519,7 @@ public final class GuiManager implements Listener {
             },
             () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction),
             null,
-            () -> input(player, "Enter nested action or command", raw -> {
+            () -> input(player, rawCommandPrompt(type, "Enter nested action or command"), raw -> {
                 parent.body().add(ActionFormatter.normalizeLine(raw));
                 openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
             }, () -> openNestedActionSelector(player, item, type, editIndex, parent, cancel, parentBackToAction, page, filter))
@@ -534,7 +534,7 @@ public final class GuiManager implements Listener {
         String line = parent.body().get(bodyIndex);
         ActionSpec spec = actionSpec(firstToken(line));
         if (spec == null || spec.block()) {
-            input(player, "Edit nested command", raw -> {
+            input(player, rawCommandPrompt(type, "Edit nested command"), raw -> {
                 parent.body().set(bodyIndex, ActionFormatter.normalizeLine(raw));
                 openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
             }, () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
@@ -1292,8 +1292,9 @@ public final class GuiManager implements Listener {
             for (int i = 0; i < commands.size(); i++) {
                 commands.set(i, ActionFormatter.normalize(commands.get(i)));
             }
-            if (TriggerExecutor.invalidVariable(commands, entry.getKey()).isPresent()) {
-                error(player, "Invalid trigger variable in " + entry.getKey());
+            Optional<String> invalidVariable = TriggerExecutor.invalidVariable(commands, entry.getKey());
+            if (invalidVariable.isPresent()) {
+                error(player, "Invalid variable {" + invalidVariable.get() + "} in " + entry.getKey() + ". " + triggerContextSummary(entry.getKey()));
                 return;
             }
             Optional<String> invalidAction = ActionValidator.invalidKnownAction(commands.stream().map(CustomItemDefinition.TriggerCommandDef::command).toList());
@@ -1350,6 +1351,81 @@ public final class GuiManager implements Listener {
     private void button(Menu menu, int slot, Material material, NamedTextColor color, String name, String lore, Consumer<InventoryClickEvent> action) {
         menu.inventory().setItem(slot, TextUtil.button(material, color, name, lore == null ? "" : lore));
         menu.action(slot, action);
+    }
+
+    private void button(Menu menu, int slot, Material material, NamedTextColor color, String name, List<String> lore) {
+        button(menu, slot, material, color, name, lore, e -> {});
+    }
+
+    private void button(Menu menu, int slot, Material material, NamedTextColor color, String name, List<String> lore, Consumer<InventoryClickEvent> action) {
+        menu.inventory().setItem(slot, TextUtil.button(material, color, name, lore == null ? new String[0] : lore.toArray(String[]::new)));
+        menu.action(slot, action);
+    }
+
+    private String rawCommandPrompt(TriggerType type, String action) {
+        return action + ". " + triggerContextSummary(type) + " Variables: " + String.join(" | ", triggerVariableGroups(type));
+    }
+
+    private List<String> triggerVariableLore(TriggerType type) {
+        List<String> lore = new ArrayList<>();
+        lore.add(triggerContextSummary(type));
+        lore.addAll(triggerVariableGroups(type));
+        return lore;
+    }
+
+    private List<String> triggerVariableGroups(TriggerType type) {
+        List<String> groups = new ArrayList<>();
+        groups.add("Always: " + variables("SELF", "SELF_UUID", "WORLD", "X", "Y", "Z", "ITEM_ID", "ITEM_NAME"));
+        if (TriggerType.TARGET_TRIGGERS.contains(type)) {
+            groups.add("Target: " + variables("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID"));
+        }
+        if (TriggerType.BLOCK_TRIGGERS.contains(type)) {
+            groups.add("Block: " + variables("BLOCK"));
+        }
+        if (TriggerType.PROJECTILE_TRIGGERS.contains(type)) {
+            groups.add("Projectile: " + variables("PROJECTILE"));
+        }
+        return groups;
+    }
+
+    private static String variables(String... names) {
+        return Arrays.stream(names)
+            .map(name -> "{" + name + "}")
+            .reduce((left, right) -> left + ", " + right)
+            .orElse("");
+    }
+
+    private static String triggerContextSummary(TriggerType type) {
+        return switch (type) {
+            case RIGHT_CLICK -> "Starts at self. Use RIGHT_CLICK_BLOCK when {BLOCK} is needed.";
+            case RIGHT_CLICK_BLOCK -> "Starts at the clicked block. Block context is available.";
+            case LEFT_CLICK -> "Starts at self. Use LEFT_CLICK_BLOCK when {BLOCK} is needed.";
+            case LEFT_CLICK_BLOCK -> "Starts at the clicked block. Block context is available.";
+            case ALL_CLICK -> "Starts at self. Use block-specific click triggers when {BLOCK} is needed.";
+            case CONSUME -> "Starts at self after the item is consumed.";
+            case BLOCK_BREAK -> "Starts at the broken block. Block context is available.";
+            case BLOCK_PLACE -> "Starts at the placed block. Block context is available.";
+            case CLICK_ENTITY -> "Starts at self, target = clicked entity, location = target.";
+            case CLICK_PLAYER -> "Starts at self, target = clicked player, location = target.";
+            case HIT_ENTITY -> "Starts at self, target = hit entity, location = target.";
+            case HIT_PLAYER -> "Starts at self, target = hit player, location = target.";
+            case HIT_BY_ENTITY -> "Starts at self, target = attacking entity, location = target.";
+            case HIT_BY_PLAYER -> "Starts at self, target = attacking player, location = target.";
+            case HIT_GLOBAL -> "Starts at self, target = damager, location = target.";
+            case KILL_ENTITY -> "Starts at self, target = killed entity, location = target.";
+            case KILL_PLAYER -> "Starts at self, target = killed player, location = target.";
+            case LAUNCH_PROJECTILE -> "Starts at self. Projectile context is available.";
+            case PROJECTILE_HIT_BLOCK -> "Starts at projectile hit block. Projectile and block context are available.";
+            case PROJECTILE_HIT_ENTITY -> "Starts at projectile hit entity. Projectile and target context are available.";
+            case PROJECTILE_HIT_PLAYER -> "Starts at projectile hit player. Projectile and target context are available.";
+            case DROP_SELF -> "Starts at self when the tagged item is dropped.";
+            case SELECT_SELF -> "Starts at self when switching onto the tagged item.";
+            case DESELECT_SELF -> "Starts at self when switching away from the tagged item.";
+            case EQUIP_SELF -> "Starts at self when the tagged item is equipped.";
+            case UNEQUIP_SELF -> "Starts at self when the tagged item is unequipped.";
+            case ITEM_BREAK -> "Starts at self when the tagged item breaks.";
+            case DEATH -> "Starts at self when the player dies with the tagged item in main hand.";
+        };
     }
 
     private void numberButton(Menu menu, Player player, CustomItemDefinition item, int slot, Material material, String name, Integer value, Consumer<Integer> setter) {
