@@ -23,6 +23,16 @@ final class ActionEngineTest {
         assertFalse(ActionEngine.sameEntity(other, null));
     }
 
+    @Test
+    void veinmineIncludesObliqueNeighbors() {
+        assertTrue(ActionEngine.isVeinmineNeighborOffset(1, 0, 0));
+        assertTrue(ActionEngine.isVeinmineNeighborOffset(1, 1, 0));
+        assertTrue(ActionEngine.isVeinmineNeighborOffset(1, 1, 1));
+
+        assertFalse(ActionEngine.isVeinmineNeighborOffset(0, 0, 0));
+        assertFalse(ActionEngine.isVeinmineNeighborOffset(2, 0, 0));
+    }
+
     @SuppressWarnings("unchecked")
     private static <T extends Entity> T fake(Class<T> type, UUID uuid) {
         return (T) Proxy.newProxyInstance(

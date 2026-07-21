@@ -579,13 +579,20 @@ public final class ActionEngine {
             for (int x = -1; x <= 1; x++) {
                 for (int y = -1; y <= 1; y++) {
                     for (int z = -1; z <= 1; z++) {
-                        if (Math.abs(x) + Math.abs(y) + Math.abs(z) == 1) {
+                        if (isVeinmineNeighborOffset(x, y, z)) {
                             queue.add(block.getRelative(x, y, z));
                         }
                     }
                 }
             }
         }
+    }
+
+    static boolean isVeinmineNeighborOffset(int x, int y, int z) {
+        return x >= -1 && x <= 1
+            && y >= -1 && y <= 1
+            && z >= -1 && z <= 1
+            && !(x == 0 && y == 0 && z == 0);
     }
 
     private boolean matchesVeinmineFilter(Material material, Material startType, VeinmineOptions options, Map<NamespacedKey, Tag<Material>> tags) {
