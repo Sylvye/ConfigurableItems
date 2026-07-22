@@ -114,7 +114,7 @@ public final class GuiManager implements Listener {
             openMain(player, 0);
         });
         button(menu, 49, Material.PLAYER_HEAD, NamedTextColor.GREEN, "Give To Self", "", e -> player.getInventory().addItem(itemFactory.create(item)));
-        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, "Save", "Write YAML and update cache", e -> save(player, item));
+        saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -338,10 +338,15 @@ public final class GuiManager implements Listener {
         button(menu, 12, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Add Action", "Choose a CI action", e -> openActionSelector(player, item, type, -1, 0, ""));
         int slot = 19;
         List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
-        for (int i = 0; i < commands.size() && slot < 44; i++) {
-            int index = i;
-            CustomItemDefinition.TriggerCommandDef command = commands.get(i);
-            button(menu, slot++, Material.REDSTONE, command.cooldownEnabled() ? NamedTextColor.GOLD : NamedTextColor.RED, command.command(), cooldownLore(command), e -> {
+        for (ActionCommandRows.Row row : ActionCommandRows.rows(commandLines(commands))) {
+            if (slot >= 44) {
+                break;
+            }
+            int index = row.startIndex();
+            CustomItemDefinition.TriggerCommandDef command = commands.get(index);
+            Material icon = row.block() ? Material.COMMAND_BLOCK : Material.REDSTONE;
+            NamedTextColor color = command.cooldownEnabled() ? NamedTextColor.GOLD : row.block() ? NamedTextColor.YELLOW : NamedTextColor.RED;
+            button(menu, slot++, icon, color, row.summary(), cooldownLore(command, row), e -> {
                 if (e.isRightClick()) {
                     promptCooldown(player, item, type, index);
                     return;
@@ -355,6 +360,7 @@ public final class GuiManager implements Listener {
             });
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openTriggers(player, item));
+        saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -401,7 +407,9 @@ public final class GuiManager implements Listener {
                     openTriggerCommands(player, item, type);
                     return;
                 }
-                openActionEditor(player, item, type, editIndex, ActionDraft.create(spec), () -> openActionSelector(player, item, type, editIndex, page, filter));
+                ActionDraft draft = ActionDraft.create(spec);
+                int index = upsertActionDraft(item, type, editIndex, draft);
+                openActionEditor(player, item, type, index, draft, () -> openTriggerCommands(player, item, type));
             },
             () -> openTriggerCommands(player, item, type),
             null,
@@ -409,7 +417,7 @@ public final class GuiManager implements Listener {
                 String normalized = ActionFormatter.normalizeLine(raw);
                 if (editIndex >= 0) {
                     List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
-                    commands.set(editIndex, commands.get(editIndex).withCommand(normalized));
+                    replaceCommandRange(commands, editIndex, List.of(normalized));
                 } else {
                     item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(normalized));
                 }
@@ -437,98 +445,117 @@ public final class GuiManager implements Listener {
         } else if (draft.spec.hasBody()) {
             button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", draft.body().isEmpty() ? "Empty" : String.join(" <+> ", draft.body()), e -> openActionBodyEditor(player, item, type, editIndex, draft, cancel));
         }
-        button(menu, 45, Material.BARRIER, NamedTextColor.RED, "Cancel", "", e -> cancel.run());
-        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionSelector(player, item, type, editIndex, 0, ""));
-        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, editIndex >= 0 ? "Save Action" : "Add Action", preview(draft), e -> saveActionDraft(player, item, type, editIndex, draft, cancel));
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openTriggerCommands(player, item, type));
+        saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
     private void editActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, ActionParam param, Runnable cancel) {
         if (param.kind() == ParamKind.BOOLEAN) {
             draft.put(param.key(), String.valueOf(!Boolean.parseBoolean(draft.value(param.key()))));
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         if (param.kind() == ParamKind.TARGET_MODE) {
             draft.put(param.key(), next(draft.value(param.key()), "COORDS", "SELF", "TARGET"));
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         if (param.kind() == ParamKind.HITSCAN_TARGET) {
             draft.put(param.key(), next(draft.value(param.key()), "ANY", "PLAYER", "MOB"));
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         if (param.kind() == ParamKind.VEINMINE_MODE) {
             draft.put(param.key(), next(draft.value(param.key()), "DESTROY", "REPLACE"));
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         if (param.kind() == ParamKind.VEINMINE_MATCH) {
             draft.put(param.key(), next(draft.value(param.key()), "ALL", "SAME_TYPE"));
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             draft.put(param.key(), value);
+            upsertActionDraft(item, type, editIndex, draft);
             openActionEditor(player, item, type, editIndex, draft, cancel);
         }, () -> openActionEditor(player, item, type, editIndex, draft, cancel));
     }
 
     private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel) {
-        openActionBodyEditor(player, item, type, editIndex, draft, cancel, () -> openActionEditor(player, item, type, editIndex, draft, cancel));
+        openActionBodyEditor(player, item, type, editIndex, draft, cancel, () -> openActionEditor(player, item, type, editIndex, draft, cancel), () -> upsertActionDraft(item, type, editIndex, draft));
     }
 
     private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel, Runnable backToAction) {
+        openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction, () -> upsertActionDraft(item, type, editIndex, draft));
+    }
+
+    private void openActionBodyEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel, Runnable backToAction, Runnable bodyChanged) {
         Menu menu = new Menu("Action Body");
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Nested Action", "Choose a CI action", e -> openNestedActionSelector(player, item, type, editIndex, draft, cancel, backToAction, 0, ""));
+        button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Nested Action", "Choose a CI action", e -> openNestedActionSelector(player, item, type, editIndex, draft, cancel, backToAction, bodyChanged, 0, ""));
         button(menu, 11, Material.NAME_TAG, NamedTextColor.YELLOW, "Add Raw Line", triggerContextSummary(type), e -> input(player, rawCommandPrompt(type, "Enter nested action or command"), raw -> {
             draft.body().add(ActionFormatter.normalizeLine(raw));
-            openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction);
-        }, () -> openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction)));
+            bodyChanged.run();
+            openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction, bodyChanged);
+        }, () -> openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction, bodyChanged)));
         int slot = 19;
-        for (int i = 0; i < draft.body().size() && slot < 44; i++) {
-            int bodyIndex = i;
-            button(menu, slot++, Material.REDSTONE, NamedTextColor.AQUA, draft.body().get(i), "Left edit | Shift remove", e -> {
+        for (ActionCommandRows.Row row : ActionCommandRows.rows(draft.body())) {
+            if (slot >= 44) {
+                break;
+            }
+            int bodyIndex = row.startIndex();
+            Material icon = row.block() ? Material.COMMAND_BLOCK : Material.REDSTONE;
+            button(menu, slot++, icon, NamedTextColor.AQUA, row.summary(), "Left edit | Shift remove", e -> {
                 if (e.isShiftClick()) {
-                    draft.body().remove(bodyIndex);
-                    openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction);
+                    removeLineRange(draft.body(), row.startIndex(), row.endIndex());
+                    bodyChanged.run();
+                    openActionBodyEditor(player, item, type, editIndex, draft, cancel, backToAction, bodyChanged);
                     return;
                 }
-                openNestedExistingActionEditor(player, item, type, editIndex, draft, bodyIndex, cancel, backToAction);
+                openNestedExistingActionEditor(player, item, type, editIndex, draft, bodyIndex, cancel, backToAction, bodyChanged);
             });
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> backToAction.run());
+        saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
-    private void openNestedActionSelector(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, Runnable cancel, Runnable parentBackToAction, int page, String filter) {
+    private void openNestedActionSelector(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, Runnable cancel, Runnable parentBackToAction, Runnable parentChanged, int page, String filter) {
         openSelector(player, item, "Nested Action", actionCatalogOptions(false), page, filter,
             option -> {
                 ActionSpec spec = actionSpec(option.key());
                 if (spec != null) {
                     int bodyIndex = parent.body().size();
-                    parent.body().add(ActionFormatter.normalizeLine(ActionDraft.create(spec).format().getFirst()));
-                    openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, ActionDraft.create(spec), cancel, parentBackToAction);
+                    ActionDraft nested = ActionDraft.create(spec);
+                    parent.body().add(ActionFormatter.normalizeLine(nested.format().getFirst()));
+                    parentChanged.run();
+                    openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
                     return;
                 }
-                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged);
             },
-            () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction),
+            () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged),
             null,
             () -> input(player, rawCommandPrompt(type, "Enter nested action or command"), raw -> {
                 parent.body().add(ActionFormatter.normalizeLine(raw));
-                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
-            }, () -> openNestedActionSelector(player, item, type, editIndex, parent, cancel, parentBackToAction, page, filter))
+                parentChanged.run();
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged);
+            }, () -> openNestedActionSelector(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged, page, filter))
         );
     }
 
-    private void openNestedExistingActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, Runnable cancel, Runnable parentBackToAction) {
+    private void openNestedExistingActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, Runnable cancel, Runnable parentBackToAction, Runnable parentChanged) {
         if (bodyIndex < 0 || bodyIndex >= parent.body().size()) {
-            openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
+            openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged);
             return;
         }
         String line = parent.body().get(bodyIndex);
@@ -536,14 +563,15 @@ public final class GuiManager implements Listener {
         if (spec == null || spec.block()) {
             input(player, rawCommandPrompt(type, "Edit nested command"), raw -> {
                 parent.body().set(bodyIndex, ActionFormatter.normalizeLine(raw));
-                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
-            }, () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
+                parentChanged.run();
+                openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged);
+            }, () -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged));
             return;
         }
-        openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, draftFromLine(spec, line), cancel, parentBackToAction);
+        openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, draftFromLine(spec, line), cancel, parentBackToAction, parentChanged);
     }
 
-    private void openNestedActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, Runnable cancel, Runnable parentBackToAction) {
+    private void openNestedActionEditor(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, Runnable cancel, Runnable parentBackToAction, Runnable parentChanged) {
         Menu menu = new Menu("Nested " + nested.spec.name());
         Inventory inv = menu.inventory();
         frame(inv);
@@ -555,86 +583,101 @@ public final class GuiManager implements Listener {
                 break;
             }
             int slot = slots[paramIndex++];
-            button(menu, slot, param.icon(), NamedTextColor.AQUA, param.label(), nested.value(param.key()), e -> editNestedActionParam(player, item, type, editIndex, parent, bodyIndex, nested, param, cancel, parentBackToAction));
+            button(menu, slot, param.icon(), NamedTextColor.AQUA, param.label(), nested.value(param.key()), e -> editNestedActionParam(player, item, type, editIndex, parent, bodyIndex, nested, param, cancel, parentBackToAction, parentChanged));
         }
         if (nested.spec.hasBody()) {
-            Runnable backToNested = () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
-            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", nested.body().isEmpty() ? "Empty" : String.join(" <+> ", nested.body()), e -> openActionBodyEditor(player, item, type, editIndex, nested, backToNested, backToNested));
+            Runnable backToNested = () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
+            Runnable nestedChanged = () -> {
+                updateNestedLine(parent, bodyIndex, nested);
+                parentChanged.run();
+            };
+            button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", nested.body().isEmpty() ? "Empty" : String.join(" <+> ", nested.body()), e -> openActionBodyEditor(player, item, type, editIndex, nested, backToNested, backToNested, nestedChanged));
         }
-        button(menu, 45, Material.BARRIER, NamedTextColor.RED, "Cancel", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
-        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction));
-        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, "Save Nested", preview(nested), e -> saveNestedActionDraft(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction));
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged));
+        saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
-    private void editNestedActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, ActionParam param, Runnable cancel, Runnable parentBackToAction) {
+    private void editNestedActionParam(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, ActionParam param, Runnable cancel, Runnable parentBackToAction, Runnable parentChanged) {
         if (param.kind() == ParamKind.BOOLEAN) {
             nested.put(param.key(), String.valueOf(!Boolean.parseBoolean(nested.value(param.key()))));
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
         if (param.kind() == ParamKind.TARGET_MODE) {
             nested.put(param.key(), next(nested.value(param.key()), "COORDS", "SELF", "TARGET"));
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
         if (param.kind() == ParamKind.HITSCAN_TARGET) {
             nested.put(param.key(), next(nested.value(param.key()), "ANY", "PLAYER", "MOB"));
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
         if (param.kind() == ParamKind.VEINMINE_MODE) {
             nested.put(param.key(), next(nested.value(param.key()), "DESTROY", "REPLACE"));
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
         if (param.kind() == ParamKind.VEINMINE_MATCH) {
             nested.put(param.key(), next(nested.value(param.key()), "ALL", "SAME_TYPE"));
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
         input(player, param.prompt(), raw -> {
             String value = param.kind() == ParamKind.VARIABLE ? raw.toUpperCase(Locale.ROOT) : ActionFormatter.normalizeVariables(raw.trim());
             nested.put(param.key(), value);
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
-        }, () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction));
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
+        }, () -> openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged));
     }
 
-    private void saveNestedActionDraft(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft parent, int bodyIndex, ActionDraft nested, Runnable cancel, Runnable parentBackToAction) {
-        List<String> lines = ActionFormatter.normalizeLines(nested.format());
-        if (lines.isEmpty()) {
-            error(player, "Action is empty.");
-            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction);
-            return;
-        }
-        parent.body().set(bodyIndex, lines.getFirst());
-        openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction);
-    }
-
-    private void saveActionDraft(Player player, CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft, Runnable cancel) {
+    private int upsertActionDraft(CustomItemDefinition item, TriggerType type, int editIndex, ActionDraft draft) {
         List<String> lines = ActionFormatter.normalizeLines(draft.format());
         if (lines.isEmpty()) {
-            error(player, "Action is empty.");
-            openActionEditor(player, item, type, editIndex, draft, cancel);
-            return;
+            return editIndex;
         }
         List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
         if (editIndex >= 0 && editIndex < commands.size()) {
-            int end = blockEnd(commands, editIndex);
-            CustomItemDefinition.TriggerCommandDef first = commands.get(editIndex).withCommand(lines.getFirst());
-            for (int i = end; i >= editIndex; i--) {
-                commands.remove(i);
-            }
-            commands.add(editIndex, first);
-            for (int i = 1; i < lines.size(); i++) {
-                commands.add(editIndex + i, new CustomItemDefinition.TriggerCommandDef(lines.get(i)));
-            }
-        } else {
-            for (String line : lines) {
-                commands.add(new CustomItemDefinition.TriggerCommandDef(line));
-            }
+            replaceCommandRange(commands, editIndex, lines);
+            return editIndex;
         }
-        openTriggerCommands(player, item, type);
+        int index = commands.size();
+        for (String line : lines) {
+            commands.add(new CustomItemDefinition.TriggerCommandDef(line));
+        }
+        return index;
+    }
+
+    private void updateNestedLine(ActionDraft parent, int bodyIndex, ActionDraft nested) {
+        List<String> lines = ActionFormatter.normalizeLines(nested.format());
+        if (lines.isEmpty() || bodyIndex < 0 || bodyIndex >= parent.body().size()) {
+            return;
+        }
+        parent.body().set(bodyIndex, lines.getFirst());
+    }
+
+    private void replaceCommandRange(List<CustomItemDefinition.TriggerCommandDef> commands, int index, List<String> lines) {
+        int end = blockEnd(commands, index);
+        CustomItemDefinition.TriggerCommandDef first = commands.get(index).withCommand(lines.getFirst());
+        for (int i = end; i >= index; i--) {
+            commands.remove(i);
+        }
+        commands.add(index, first);
+        for (int i = 1; i < lines.size(); i++) {
+            commands.add(index + i, new CustomItemDefinition.TriggerCommandDef(lines.get(i)));
+        }
     }
 
     private ActionDraft draftFromExisting(ActionSpec spec, List<CustomItemDefinition.TriggerCommandDef> commands, int index) {
@@ -789,26 +832,7 @@ public final class GuiManager implements Listener {
     }
 
     private int blockEnd(List<CustomItemDefinition.TriggerCommandDef> commands, int index) {
-        if (index < 0 || index >= commands.size()) {
-            return index;
-        }
-        String first = firstToken(commands.get(index).command()).toUpperCase(Locale.ROOT);
-        if (!first.equals("LOOP_START") && !first.equals("RANDOM_RUN") && !first.equals("FOR") && !first.equals("PROJECTILE_TRAIL")) {
-            return index;
-        }
-        int depth = 0;
-        for (int i = index; i < commands.size(); i++) {
-            String token = firstToken(commands.get(i).command()).toUpperCase(Locale.ROOT);
-            if (token.equals("LOOP_START") || token.equals("RANDOM_RUN") || token.equals("FOR") || token.equals("PROJECTILE_TRAIL")) {
-                depth++;
-            } else if (token.equals("LOOP_END") || token.equals("RANDOM_END") || token.equals("END_FOR") || token.equals("ENDFOR") || token.equals("END_PROJECTILE_TRAIL")) {
-                depth--;
-                if (depth <= 0) {
-                    return i;
-                }
-            }
-        }
-        return index;
+        return ActionCommandRows.blockEnd(commandLines(commands), index);
     }
 
     private static String firstToken(String line) {
@@ -867,11 +891,12 @@ public final class GuiManager implements Listener {
         }, () -> openTriggerCommands(player, item, type));
     }
 
-    private String cooldownLore(CustomItemDefinition.TriggerCommandDef command) {
+    private String cooldownLore(CustomItemDefinition.TriggerCommandDef command, ActionCommandRows.Row row) {
+        String prefix = row.block() ? row.nestedLineCount() + " nested lines | " : "";
         if (!command.cooldownEnabled()) {
-            return "Left edit | Right cooldown: Disabled | Shift remove";
+            return prefix + "Left edit | Right cooldown: Disabled | Shift remove";
         }
-        return "Left edit | Right cooldown: " + command.cooldownTicks() + " ticks | Shift remove";
+        return prefix + "Left edit | Right cooldown: " + command.cooldownTicks() + " ticks | Shift remove";
     }
 
     private void openMaterialSelector(Player player, CustomItemDefinition item, int page, String filter) {
@@ -1342,6 +1367,11 @@ public final class GuiManager implements Listener {
 
     private void back(Menu menu, Player player, CustomItemDefinition item) {
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openEditor(player, item));
+        saveAll(menu, player, item);
+    }
+
+    private void saveAll(Menu menu, Player player, CustomItemDefinition item) {
+        button(menu, 53, Material.LIME_DYE, NamedTextColor.GREEN, "Save All", "Write all current draft changes to YAML", e -> save(player, item));
     }
 
     private void button(Menu menu, int slot, Material material, NamedTextColor color, String name, String lore) {
@@ -1363,7 +1393,7 @@ public final class GuiManager implements Listener {
     }
 
     private String rawCommandPrompt(TriggerType type, String action) {
-        return action + ". " + triggerContextSummary(type) + " Variables: " + String.join(" | ", triggerVariableGroups(type));
+        return action + ". Trigger: " + type.name() + ". " + triggerContextSummary(type) + " Variables: " + sortedVariables(type);
     }
 
     private List<String> triggerVariableLore(TriggerType type) {
@@ -1393,6 +1423,24 @@ public final class GuiManager implements Listener {
             .map(name -> "{" + name + "}")
             .reduce((left, right) -> left + ", " + right)
             .orElse("");
+    }
+
+    private static String sortedVariables(TriggerType type) {
+        return TriggerExecutor.allowedVariables(type).stream()
+            .sorted()
+            .map(name -> "{" + name + "}")
+            .reduce((left, right) -> left + ", " + right)
+            .orElse("");
+    }
+
+    private static List<String> commandLines(List<CustomItemDefinition.TriggerCommandDef> commands) {
+        return commands.stream().map(CustomItemDefinition.TriggerCommandDef::command).toList();
+    }
+
+    private static void removeLineRange(List<String> lines, int start, int end) {
+        for (int i = Math.min(end, lines.size() - 1); i >= start && i >= 0; i--) {
+            lines.remove(i);
+        }
     }
 
     private static String triggerContextSummary(TriggerType type) {
