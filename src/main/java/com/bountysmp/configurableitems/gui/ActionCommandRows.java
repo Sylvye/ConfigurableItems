@@ -44,7 +44,9 @@ final class ActionCommandRows {
         return normalized.equals("LOOP_START")
             || normalized.equals("RANDOM_RUN")
             || normalized.equals("FOR")
-            || normalized.equals("PROJECTILE_TRAIL");
+            || normalized.equals("PROJECTILE_TRAIL")
+            || normalized.equals("HITBOX")
+            || normalized.equals("TIMER");
     }
 
     private static boolean isBlockTerminator(String token) {
@@ -53,7 +55,9 @@ final class ActionCommandRows {
             || normalized.equals("RANDOM_END")
             || normalized.equals("END_FOR")
             || normalized.equals("ENDFOR")
-            || normalized.equals("END_PROJECTILE_TRAIL");
+            || normalized.equals("END_PROJECTILE_TRAIL")
+            || normalized.equals("END_HITBOX")
+            || normalized.equals("END_TIMER");
     }
 
     private static int nestedLineCount(int start, int end, boolean block) {

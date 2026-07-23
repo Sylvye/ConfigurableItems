@@ -25,7 +25,17 @@ public final class TriggerExecutor {
     private static final Set<String> TARGET_VARIABLES = Set.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z");
     private static final Set<String> BLOCK_VARIABLES = Set.of("BLOCK", "BLOCK_WORLD", "BLOCK_X", "BLOCK_Y", "BLOCK_Z");
     private static final Set<String> PROJECTILE_VARIABLES = Set.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z");
+    private static final Set<String> HIT_VARIABLES = Set.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z");
     private static final Set<String> RESERVED_FOR_VARIABLES = Set.of("X", "Y", "Z", "WORLD");
+    private static final Set<TriggerType> DAMAGE_TRIGGERS = Set.of(
+        TriggerType.HIT_ENTITY,
+        TriggerType.HIT_PLAYER,
+        TriggerType.HIT_BY_ENTITY,
+        TriggerType.HIT_BY_PLAYER,
+        TriggerType.HIT_GLOBAL,
+        TriggerType.PROJECTILE_HIT_ENTITY,
+        TriggerType.PROJECTILE_HIT_PLAYER
+    );
 
     private final Plugin plugin;
     private final ItemRepository repository;
@@ -96,6 +106,9 @@ public final class TriggerExecutor {
         if (TriggerType.PROJECTILE_TRIGGERS.contains(type)) {
             allowed.addAll(PROJECTILE_VARIABLES);
         }
+        if (DAMAGE_TRIGGERS.contains(type)) {
+            allowed.add("CRITICAL");
+        }
         return allowed;
     }
 
@@ -106,8 +119,11 @@ public final class TriggerExecutor {
     public static Optional<String> invalidVariable(List<CustomItemDefinition.TriggerCommandDef> commands, TriggerType type) {
         Set<String> scopedVariables = new HashSet<>();
         List<String> forStack = new ArrayList<>();
+        int timerDepth = 0;
+        int hitboxDepth = 0;
         for (CustomItemDefinition.TriggerCommandDef command : commands) {
             String raw = command.command();
+            String upper = raw.trim().toUpperCase(Locale.ROOT);
             Optional<String> forVariable = parseForVariable(raw);
             if (forVariable.isPresent()) {
                 if (RESERVED_FOR_VARIABLES.contains(forVariable.get())) {
@@ -116,9 +132,25 @@ public final class TriggerExecutor {
                 scopedVariables.add(forVariable.get());
                 forStack.add(forVariable.get());
             }
-            Optional<String> invalid = invalidVariable(raw, type, scopedVariables);
+            if (upper.startsWith("TIMER")) {
+                timerDepth++;
+                scopedVariables.add("TICKS");
+            }
+            if (upper.startsWith("HITBOX")) {
+                hitboxDepth++;
+            }
+            Optional<String> invalid = invalidVariable(raw, type, scopedVariables, hitboxDepth > 0);
             if (invalid.isPresent()) {
                 return invalid;
+            }
+            if (upper.equals("END_TIMER")) {
+                timerDepth = Math.max(0, timerDepth - 1);
+                if (timerDepth == 0) {
+                    scopedVariables.remove("TICKS");
+                }
+            }
+            if (upper.equals("END_HITBOX")) {
+                hitboxDepth = Math.max(0, hitboxDepth - 1);
             }
             parseEndForVariable(raw).ifPresent(variable -> {
                 for (int i = forStack.size() - 1; i >= 0; i--) {
@@ -136,7 +168,16 @@ public final class TriggerExecutor {
     }
 
     private static Optional<String> invalidVariable(String command, TriggerType type, Set<String> scopedVariables) {
+        return invalidVariable(command, type, scopedVariables, false);
+    }
+
+    private static Optional<String> invalidVariable(String command, TriggerType type, Set<String> scopedVariables, boolean hitboxScope) {
         Set<String> allowed = allowedVariables(type);
+        if (hitboxScope) {
+            allowed.addAll(TARGET_VARIABLES);
+            allowed.addAll(BLOCK_VARIABLES);
+            allowed.addAll(HIT_VARIABLES);
+        }
         Matcher matcher = VARIABLE.matcher(command);
         while (matcher.find()) {
             String rawVariable = matcher.group(1);
@@ -212,11 +253,22 @@ public final class TriggerExecutor {
     }
 
     private static boolean isBlockHeader(String upper) {
-        return upper.startsWith("LOOP_START") || upper.startsWith("RANDOM_RUN") || upper.startsWith("FOR ");
+        return upper.startsWith("LOOP_START")
+            || upper.startsWith("RANDOM_RUN")
+            || upper.startsWith("FOR ")
+            || upper.startsWith("PROJECTILE_TRAIL")
+            || upper.startsWith("HITBOX")
+            || upper.startsWith("TIMER");
     }
 
     private static boolean isBlockTerminator(String upper) {
-        return upper.equals("LOOP_END") || upper.equals("RANDOM_END") || upper.startsWith("END_FOR") || upper.startsWith("ENDFOR ");
+        return upper.equals("LOOP_END")
+            || upper.equals("RANDOM_END")
+            || upper.startsWith("END_FOR")
+            || upper.startsWith("ENDFOR ")
+            || upper.equals("END_PROJECTILE_TRAIL")
+            || upper.equals("END_HITBOX")
+            || upper.equals("END_TIMER");
     }
 
     private static Optional<String> parseForVariable(String raw) {

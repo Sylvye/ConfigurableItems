@@ -160,6 +160,12 @@ Projectile variables are available for projectile triggers:
 | `{PROJECTILE_WORLD}` | Projectile world. |
 | `{PROJECTILE_X}` / `{PROJECTILE_Y}` / `{PROJECTILE_Z}` | Projectile coordinates. |
 
+Damage triggers expose:
+
+| Variable | Value |
+| --- | --- |
+| `{CRITICAL}` | `true` when the player hit matches critical-hit movement conditions, otherwise `false`. |
+
 `FOR` loops can create dynamic variables. Use lowercase or mixed-case variable names such as `{tier}` or `{for1}`. Uppercase unknown variables are rejected during GUI save validation because uppercase names are reserved for trigger context variables.
 
 ```text
@@ -171,8 +177,8 @@ END_FOR color
 #### Which Variable Should I Use?
 
 - Use `RIGHT_CLICK_BLOCK` or `LEFT_CLICK_BLOCK` when you need `{BLOCK}` from a click. `RIGHT_CLICK` and `LEFT_CLICK` are broad click triggers and do not validate `{BLOCK}`.
-- Use `AROUND`, `NEAREST`, `MOB_AROUND`, `MOB_NEAREST`, or `HITSCAN` when a trigger does not start with a target but nested actions need `{TARGET}`.
-- Use `{PROJECTILE}` only in `LAUNCH_PROJECTILE`, `PROJECTILE_HIT_BLOCK`, `PROJECTILE_HIT_ENTITY`, and `PROJECTILE_HIT_PLAYER`.
+- Use `AROUND`, `NEAREST`, `HITSCAN`, or `HITBOX` when a trigger does not start with a target but nested actions need `{TARGET}`.
+- Use `{PROJECTILE}` only in the `LAUNCH_PROJECTILE` action, the `LAUNCH_PROJECTILE` trigger, `PROJECTILE_HIT_BLOCK`, `PROJECTILE_HIT_ENTITY`, and `PROJECTILE_HIT_PLAYER`.
 - Use `{SELF_WORLD}`, `{SELF_X}`, `{SELF_Y}`, and `{SELF_Z}` for `{SELF}`. Use scoped coordinate variables for selected targets, blocks, hits, and projectiles.
 
 ### Trigger Reference
@@ -362,45 +368,44 @@ END_FOR x
 
 `ENDFOR var` is also accepted.
 
+### `TIMER duration:<ticks> [interval:<ticks>]` / `END_TIMER`
+
+Runs the nested body repeatedly until `duration` is reached. Inside the body, `{TICKS}` counts up from `0` by `interval`.
+
+```text
+TIMER duration:40 interval:5
+PARTICLE CRIT 1 at:SELF
+ACTIONBAR target:SELF &eCharge {TICKS}
+END_TIMER
+```
+
 ## Selector Actions
 
 Selector actions temporarily replace the current action target for their nested body. Entity/player actions affect the selected target. Message actions send to the selected player when the selected target is a player; otherwise they fall back to `{SELF}`.
 
-### `AROUND <radius> <action...>`
+### `AROUND <radius> [target:PLAYER|MOB|ENTITY] <action...>`
 
-Runs the nested action once for each nearby player except self.
-
-```text
-AROUND 10 SEND_MESSAGE &e{SELF} activated an aura
-```
-
-### `MOB_AROUND <radius> <action...>`
-
-Runs the nested action once for each nearby living non-player mob.
+Runs the nested action once for each nearby matching entity except self. `target:PLAYER` selects players only and is the default, `target:MOB` selects living non-player entities, and `target:ENTITY` selects all entities.
 
 ```text
-MOB_AROUND 8 DAMAGE 3
+AROUND 10 target:PLAYER SEND_MESSAGE &e{SELF} activated an aura
+AROUND 8 target:MOB DAMAGE 3
 ```
 
-### `NEAREST <radius> <action...>`
+### `NEAREST <radius> [target:PLAYER|MOB|ENTITY] <action...>`
 
-Runs the nested action for the nearest nearby player except self.
+Runs the nested action for the nearest nearby matching entity except self. `target:PLAYER` is the default.
 
 ```text
-NEAREST 16 ACTIONBAR &cYou were marked by {SELF}
+NEAREST 16 target:PLAYER ACTIONBAR &cYou were marked by {SELF}
+NEAREST 12 target:MOB BURN 4
 ```
 
-### `MOB_NEAREST <radius> <action...>`
-
-Runs the nested action for the nearest nearby living non-player mob.
-
-```text
-MOB_NEAREST 12 BURN 4
-```
+Legacy `MOB_AROUND <radius> ...` and `MOB_NEAREST <radius> ...` still run, but new saves normalize them to `AROUND <radius> target:MOB ...` and `NEAREST <radius> target:MOB ...`.
 
 ### `HITSCAN <distance> [target:ENTITY|PLAYER|MOB|BLOCK] [max-hits:<n>|max-hits:all] [speed:instant|<blocksPerSecond>] [particle:<type>] [points:<n>] [offset:<value>] [particle-speed:<value>] <action...>`
 
-Looks along `{SELF}`'s view direction. Raycasts always stop at the first blocking block. `target:ENTITY` is the default and selects entities before that block. `target:PLAYER` only selects players, `target:MOB` only selects living non-player mobs, and `target:BLOCK` ignores entities and selects the first block. Use `max-hits` for entity modes. Use `speed:<blocksPerSecond>` to delay the nested action until the ray reaches each hit; `speed:instant` is the default. If `particle` is set, ConfigurableItems draws the trail at the same ray speed.
+Looks along `{SELF}`'s view direction. Raycasts always stop at the first blocking block. `target:ENTITY` is the default and selects entities before that block. `target:PLAYER` only selects players, `target:MOB` only selects living non-player entities, and `target:BLOCK` ignores entities and selects the first block. Use `max-hits` for entity modes. Use `speed:<blocksPerSecond>` to delay the nested action until the ray reaches each hit; `speed:instant` is the default. If `particle` is set, ConfigurableItems draws the trail at the same ray speed.
 
 Inside the nested body, HITSCAN exposes `{HIT_TYPE}`, `{HIT_WORLD}`, `{HIT_X}`, `{HIT_Y}`, and `{HIT_Z}`. Entity modes also expose target variables. Block mode exposes block variables.
 
@@ -413,29 +418,49 @@ HITSCAN 32 target:BLOCK speed:1 particle:CRIT points:32 minecraft:fill {HIT_X-1}
 
 Old HITSCAN particle velocity written as `speed:<small decimal>` with a `particle:` option is normalized to `particle-speed:<value>`. Use `speed:` for ray travel speed.
 
+### `HITBOX shape:SPHERE|CUBE|CONE size:<n> [at:<location>] [targets:PLAYER,MOB,ENTITY,BLOCK] [max-players:<n>] [max-entities:<n>] [max-blocks:<n>] [particle:<type>] [edge-particles:true|false] [points:<n>]` / `END_HITBOX`
+
+Collects matching players, non-player entities, and non-air blocks in the shape, sorts hits by distance, applies each independent cap, then runs the nested body once per hit. Entity hits expose target and hit variables. Block hits expose block and hit variables.
+
+```text
+HITBOX shape:SPHERE size:4 at:SELF targets:PLAYER,MOB max-players:8 max-entities:16 particle:CRIT edge-particles:true
+DAMAGE 3 target:TARGET
+END_HITBOX
+
+HITBOX shape:CUBE size:3 targets:BLOCK max-blocks:64
+SET_TEMP_BLOCK GLOWSTONE 40
+END_HITBOX
+```
+
 ## Entity And Player Actions
 
 Entity actions accept `target:SELF`, `target:TARGET`, or `target:CURRENT`. If omitted, `target:CURRENT` is used for legacy configs. `target:TARGET` requires a trigger, selector, or HITSCAN entity context.
 
 | Action | Description |
 | --- | --- |
-| `DAMAGE <amount> [target:<receiver>]` | Damages the selected living receiver. Supports `amount:<value>`. |
+| `LAUNCH_PROJECTILE <projectile> [speed:<n>] [gravity:true|false] [track:true|false]` | Launches a projectile from `{SELF}`'s eye direction. Tracked projectiles can fire projectile hit triggers. |
+| `DAMAGE <amount> [type:normal|true] [target:<receiver>]` | Damages the selected living receiver. `type:true` directly reduces health and bypasses normal armor/protection handling. Supports `amount:<value>`. |
 | `HEAL [amount] [target:<receiver>]` | Heals the selected living receiver. Omit amount to heal to max health. |
 | `SET_HEALTH <amount> [target:<receiver>]` | Sets selected living receiver health, clamped to valid health range. |
 | `KILL [target:<receiver>]` | Sets selected living receiver health to `0`. |
 | `BURN <seconds> [target:<receiver>]` | Sets selected living receiver fire ticks. |
 | `INVULNERABILITY <ticks> [target:<receiver>]` | Sets selected living receiver no-damage ticks. |
-| `TELEPORT target:<receiver> <x> <y> <z> [world]` | Teleports selected receiver to coordinates. Uses current world if omitted. |
-| `TELEPORT target:<receiver> to:SELF|TARGET|CURRENT|HIT|BLOCK` | Teleports selected receiver to a context location. |
+| `TELEPORT target:<receiver> <x> <y> <z> [world] [safe:true|false]` | Teleports selected receiver to coordinates. Uses current world if omitted. `safe:true` searches nearby for a solid floor and two passable blocks. |
+| `TELEPORT target:<receiver> to:SELF|TARGET|CURRENT|HIT|BLOCK [safe:true|false]` | Teleports selected receiver to a context location. |
 | `VELOCITY <x> <y> <z> [target:<receiver>]` | Sets selected living receiver velocity. |
 | `DASH <strength>` | Pushes `{SELF}` forward in their look direction. |
+| `IMPULSE <x> <y> <z> power:<n> targets:<...> [radius:<n>] normalize:true|false` | Pushes selected targets away from the origin. Negative power pulls them toward it. `normalize:false` applies linear distance falloff. |
+| `EXPLODE <power> <x> <y> <z> [world] [fire:true|false] [break-blocks:true|false]` | Creates an explosion at coordinates. |
 
 Examples:
 
 ```text
 DAMAGE 4
-MOB_AROUND 8 DAMAGE amount:2 target:TARGET
-NEAREST 12 TELEPORT target:TARGET to:SELF
+DAMAGE 8 type:true target:TARGET
+LAUNCH_PROJECTILE ARROW speed:2 gravity:true track:true
+AROUND 8 target:MOB DAMAGE amount:2 target:TARGET
+NEAREST 12 target:PLAYER TELEPORT target:TARGET to:SELF
+IMPULSE {SELF_X} {SELF_Y} {SELF_Z} power:-1.5 targets:ENTITIES radius:8 normalize:false
 ```
 
 In a `HIT_PLAYER` trigger folder, `DAMAGE 4` still damages the hit player through legacy `target:CURRENT`. New GUI entries write the receiver explicitly.
@@ -446,7 +471,7 @@ In a `HIT_PLAYER` trigger folder, `DAMAGE 4` still damages the hit player throug
 | --- | --- |
 | `SEND_MESSAGE [target:<receiver>] <text>` | Sends a chat message to the selected player receiver. Omitted target keeps legacy current-player-or-self behavior. Supports `&` color/style codes. |
 | `ACTIONBAR [target:<receiver>] <text>` | Sends an actionbar message to the selected player receiver. Omitted target keeps legacy current-player-or-self behavior. Supports `&` color/style codes. |
-| `PARTICLE <type> <count> [offset] [speed] [at:<location>]` | Spawns a Bukkit particle at `SELF`, `TARGET`, `CURRENT`, `BLOCK`, `HIT`, or `PROJECTILE`. Omitted `at:` keeps legacy current location behavior. |
+| `PARTICLE <type> <count> [offset] [speed] [at:<location>] [shape:<shape>] [size:<n>] [rotation:<x>,<y>,<z>] [points:<n>]` | Spawns a Bukkit particle at `SELF`, `TARGET`, `CURRENT`, `BLOCK`, `HIT`, or `PROJECTILE`. Shapes draw outlines for `POINT`, `CIRCLE`, `LINE`, `TRIANGLE`, `SQUARE`, `PENTAGON`, `HEXAGON`, `SEPTAGON`, `OCTAGON`, `NONAGON`, or `DECAGON`. |
 | `PARTICLE_LINE <type> <distance> <points> [offset] [speed] [at:<location>]` | Spawns one particle per point in a line from the selected location along the player's look direction. |
 | `PROJECTILE_TRAIL [particle:<type>] [count:<n>] [points:<n>] [interval:<ticks>] [duration:<ticks>] [offset:<value>] [speed:<value>]` / `END_PROJECTILE_TRAIL` | Runs nested actions at the current projectile location until the projectile stops or duration expires. Intended for `LAUNCH_PROJECTILE`. |
 
@@ -456,6 +481,7 @@ Examples:
 SEND_MESSAGE target:SELF &aItem ready.
 ACTIONBAR target:TARGET &eMarked
 PARTICLE FLAME 20 0.2 0.01 at:SELF
+PARTICLE FLAME 1 0 0 at:SELF shape:HEXAGON size:2 rotation:0,45,0 points:24
 PARTICLE_LINE FLAME 8 24 0 0 at:HIT
 PROJECTILE_TRAIL particle:FLAME points:3 interval:1 duration:100 offset:0 speed:0
 PARTICLE CRIT 2 0.05 0
@@ -478,6 +504,9 @@ Block actions require block context. Use block triggers such as `RIGHT_CLICK_BLO
 | `BREAK_BLOCK [drop:true|false]` | Breaks the current block. Defaults to dropping items. |
 | `DROPITEM <material> [amount] [at:<location>]` | Drops an item at `SELF`, `TARGET`, `CURRENT`, `BLOCK`, `HIT`, or `PROJECTILE`. |
 | `VEINMINE [limit] [drop:true|false] [filter:<material|#tag>[,<material|#tag>...]] [match:all|same-type] [mode:destroy|replace] [replace:<material>] [use-enchants:true|false] [use-durability:true|false] [effect:true|false] [xp:true|false]` | Breaks or replaces connected blocks from the current block. Defaults limit to the configured veinmine warning threshold. |
+| `DAMAGE_ITEM [amount] [item:SELF|<material>] [target:<receiver>]` | Damages the selected player's held item or first matching material. |
+| `TAKE_ITEM SELF|<material> [amount] [target:<receiver>]` | Removes items from the selected player's inventory. `SELF` prefers held items. |
+| `REPAIR_ITEM [amount|full] [item:SELF|<material>] [target:<receiver>]` | Repairs the selected player's held item or first matching material. |
 
 Examples:
 
@@ -486,6 +515,9 @@ SET_BLOCK STONE
 SET_TEMP_BLOCK GLOWSTONE 100
 BREAK_BLOCK drop:false
 DROPITEM DIAMOND 1
+DAMAGE_ITEM 1 item:SELF target:SELF
+TAKE_ITEM DIAMOND 3 target:SELF
+REPAIR_ITEM full item:SELF target:SELF
 VEINMINE 64 drop:true
 VEINMINE 128 filter:#minecraft:logs drop:true use-durability:false
 VEINMINE 128 filter:#minecraft:logs,#minecraft:leaves,minecraft:bee_nest drop:true
@@ -604,7 +636,7 @@ Common errors:
 | `Malformed number` | A numeric argument could not be parsed. |
 | `Malformed FOR block` | `FOR` did not match `FOR [a,b,c] > var`. |
 | `IF is missing an action body` | `IF` has a condition but no action after it. |
-| `selector is missing an action body` | `AROUND`, `NEAREST`, `MOB_AROUND`, `MOB_NEAREST`, or `HITSCAN` has no nested action. |
+| `selector is missing an action body` | `AROUND`, `NEAREST`, or `HITSCAN` has no nested action. |
 
 ## Troubleshooting
 
@@ -637,10 +669,11 @@ LOOP_START / LOOP_END
 RANDOM_RUN / RANDOM_END
 FOR / END_FOR
 AROUND
-MOB_AROUND
 NEAREST
-MOB_NEAREST
 HITSCAN
+HITBOX
+TIMER
+LAUNCH_PROJECTILE
 DAMAGE
 HEAL
 SET_HEALTH
@@ -650,6 +683,11 @@ INVULNERABILITY
 TELEPORT
 VELOCITY
 DASH
+DAMAGE_ITEM
+TAKE_ITEM
+REPAIR_ITEM
+IMPULSE
+EXPLODE
 SEND_MESSAGE
 ACTIONBAR
 PARTICLE

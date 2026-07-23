@@ -19,6 +19,15 @@ public final class ActionValidator {
     private static final Set<String> HIT_VARIABLES = Set.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z");
     private static final Set<String> BLOCK_ACTIONS = Set.of("SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "VEINMINE");
     private static final Set<String> RESERVED_FOR_VARIABLES = Set.of("X", "Y", "Z", "WORLD");
+    private static final Set<TriggerType> DAMAGE_TRIGGERS = Set.of(
+        TriggerType.HIT_ENTITY,
+        TriggerType.HIT_PLAYER,
+        TriggerType.HIT_BY_ENTITY,
+        TriggerType.HIT_BY_PLAYER,
+        TriggerType.HIT_GLOBAL,
+        TriggerType.PROJECTILE_HIT_ENTITY,
+        TriggerType.PROJECTILE_HIT_PLAYER
+    );
 
     private ActionValidator() {
     }
@@ -36,11 +45,15 @@ public final class ActionValidator {
     }
 
     private static Optional<String> invalidSteps(List<ActionStep> steps, ContextScope context, boolean allowTrailingDelay) {
+        ContextScope current = context;
         for (int i = 0; i < steps.size(); i++) {
             ActionStep step = steps.get(i);
-            Optional<String> invalid = invalidStep(step, context, i == steps.size() - 1, allowTrailingDelay);
+            Optional<String> invalid = invalidStep(step, current, i == steps.size() - 1, allowTrailingDelay);
             if (invalid.isPresent()) {
                 return invalid;
+            }
+            if (step instanceof ActionStep.Simple simple && actionName(simple.line()).equals("LAUNCH_PROJECTILE")) {
+                current = current.withProjectile();
             }
         }
         return Optional.empty();
@@ -72,6 +85,25 @@ public final class ActionValidator {
             }
             return invalidVariables(projectileTrail.header(), context).or(() -> invalidSteps(projectileTrail.body(), context.withProjectile(), false));
         }
+        if (step instanceof ActionStep.Hitbox hitbox) {
+            HitboxOptions options = HitboxOptions.parse(tokens(hitbox.header()));
+            if (!options.errors().isEmpty()) {
+                return Optional.of(options.errors().getFirst());
+            }
+            Optional<String> invalidAt = invalidAtContext(tokens(hitbox.header()), context, "HITBOX");
+            if (invalidAt.isPresent()) {
+                return invalidAt;
+            }
+            ContextScope hitContext = context.withTarget().withBlock().withHit();
+            return invalidVariables(hitbox.header(), context).or(() -> invalidSteps(hitbox.body(), hitContext, false));
+        }
+        if (step instanceof ActionStep.Timer timer) {
+            TimerOptions options = TimerOptions.parse(tokens(timer.header()));
+            if (!options.errors().isEmpty()) {
+                return Optional.of(options.errors().getFirst());
+            }
+            return invalidVariables(timer.header(), context).or(() -> invalidSteps(timer.body(), context.withVariable("TICKS"), false));
+        }
         return Optional.empty();
     }
 
@@ -102,8 +134,15 @@ public final class ActionValidator {
             }
             return invalidVariables(pieces[0], context).or(() -> invalidInline(pieces[1], context));
         }
-        if (action.equals("AROUND") || action.equals("MOB_AROUND") || action.equals("NEAREST") || action.equals("MOB_NEAREST")) {
-            return invalidInline(restAfter(line, 2), context.withTarget());
+        if (isSelector(action)) {
+            SelectorValidation selector = selector(tokens, action);
+            if (selector.error().isPresent()) {
+                return selector.error();
+            }
+            if (selector.body().isBlank()) {
+                return Optional.of(selector.action() + " is missing an action body");
+            }
+            return invalidInline(selector.body(), context.withTarget());
         }
         Optional<String> invalidVariable = invalidVariables(line, context);
         if (invalidVariable.isPresent()) {
@@ -123,6 +162,31 @@ public final class ActionValidator {
             VeinmineOptions options = VeinmineOptions.parse(tokens);
             if (!options.errors().isEmpty()) {
                 return Optional.of(options.errors().getFirst());
+            }
+        }
+        if (action.equals("PARTICLE")) {
+            ParticleShapeOptions options = ParticleShapeOptions.parse(tokens);
+            if (!options.errors().isEmpty()) {
+                return Optional.of(options.errors().getFirst());
+            }
+        }
+        if (action.equals("DAMAGE")) {
+            Optional<String> type = keyArg(tokens, "type");
+            if (type.isPresent() && !type.get().equalsIgnoreCase("normal") && !type.get().equalsIgnoreCase("true")) {
+                return Optional.of("DAMAGE type must be normal or true");
+            }
+        }
+        if (action.equals("TELEPORT")) {
+            Optional<String> safe = keyArg(tokens, "safe");
+            if (safe.isPresent() && !safe.get().equalsIgnoreCase("true") && !safe.get().equalsIgnoreCase("false")) {
+                return Optional.of("TELEPORT safe must be true or false");
+            }
+        }
+        if (action.equals("LAUNCH_PROJECTILE")) {
+            Optional<String> gravity = keyArg(tokens, "gravity");
+            Optional<String> track = keyArg(tokens, "track");
+            if (gravity.isPresent() && !booleanValue(gravity.get()) || track.isPresent() && !booleanValue(track.get())) {
+                return Optional.of("LAUNCH_PROJECTILE gravity and track must be true or false");
             }
         }
         return Optional.empty();
@@ -190,8 +254,39 @@ public final class ActionValidator {
             .findFirst();
     }
 
+    private static boolean isSelector(String action) {
+        return action.equals("AROUND") || action.equals("MOB_AROUND") || action.equals("NEAREST") || action.equals("MOB_NEAREST");
+    }
+
+    private static boolean isSelectorOption(String token) {
+        return token != null && token.toLowerCase(Locale.ROOT).startsWith("target:");
+    }
+
+    private static boolean booleanValue(String raw) {
+        return raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("false");
+    }
+
+    private static SelectorValidation selector(List<String> tokens, String action) {
+        String canonical = action.equals("MOB_AROUND") ? "AROUND" : action.equals("MOB_NEAREST") ? "NEAREST" : action;
+        int index = 2;
+        while (index < tokens.size() && isSelectorOption(tokens.get(index))) {
+            String value = tokens.get(index).substring(tokens.get(index).indexOf(':') + 1);
+            Optional<TargetKind> target = TargetKind.parse(value);
+            if (target.isEmpty() || target.get() == TargetKind.BLOCK) {
+                return new SelectorValidation(canonical, "", Optional.of(canonical + " target must be " + TargetKind.allowedValues(false) + ": " + value));
+            }
+            index++;
+        }
+        return new SelectorValidation(canonical, bodyAfter(tokens, index), Optional.empty());
+    }
+
     private static List<String> tokens(String line) {
         return List.of((line == null ? "" : line.trim()).split("\\s+")).stream().filter(value -> !value.isBlank()).toList();
+    }
+
+    private static String actionName(String line) {
+        List<String> tokens = tokens(line);
+        return tokens.isEmpty() ? "" : tokens.getFirst().toUpperCase(Locale.ROOT);
     }
 
     private static String restAfter(String line, int tokenCount) {
@@ -206,12 +301,23 @@ public final class ActionValidator {
         return value;
     }
 
+    private static String bodyAfter(List<String> tokens, int start) {
+        if (tokens.size() <= start) {
+            return "";
+        }
+        return String.join(" ", tokens.subList(start, tokens.size()));
+    }
+
+    private record SelectorValidation(String action, String body, Optional<String> error) {
+    }
+
     private record ContextScope(boolean target, boolean block, boolean projectile, boolean hit, Set<String> variables) {
         static ContextScope from(TriggerType type) {
             boolean hasTarget = type != null && TriggerType.TARGET_TRIGGERS.contains(type);
             boolean hasBlock = type != null && TriggerType.BLOCK_TRIGGERS.contains(type);
             boolean hasProjectile = type != null && TriggerType.PROJECTILE_TRIGGERS.contains(type);
-            return new ContextScope(hasTarget, hasBlock, hasProjectile, false, Set.of());
+            Set<String> variables = type != null && DAMAGE_TRIGGERS.contains(type) ? Set.of("CRITICAL") : Set.of();
+            return new ContextScope(hasTarget, hasBlock, hasProjectile, false, variables);
         }
 
         ContextScope withTarget() {

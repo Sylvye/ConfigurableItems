@@ -84,6 +84,14 @@ public final class ActionParser {
                     steps.add(parseProjectileTrail(raw));
                     continue;
                 }
+                if (upper.startsWith("HITBOX")) {
+                    steps.add(parseHitbox(raw));
+                    continue;
+                }
+                if (upper.startsWith("TIMER")) {
+                    steps.add(parseTimer(raw));
+                    continue;
+                }
                 if (hasNestedInlineBody(upper)) {
                     steps.add(new ActionStep.Simple(raw));
                     index++;
@@ -136,6 +144,16 @@ public final class ActionParser {
         private ActionStep parseProjectileTrail(String raw) {
             index++;
             return new ActionStep.ProjectileTrail(raw, parseUntil("END_PROJECTILE_TRAIL"));
+        }
+
+        private ActionStep parseHitbox(String raw) {
+            index++;
+            return new ActionStep.Hitbox(raw, parseUntil("END_HITBOX"));
+        }
+
+        private ActionStep parseTimer(String raw) {
+            index++;
+            return new ActionStep.Timer(raw, parseUntil("END_TIMER"));
         }
 
         private ForSpec parseForSpec(String spec, String arrowVariable, String raw) {
@@ -213,7 +231,12 @@ public final class ActionParser {
         }
 
         private boolean isTerminator(String upper) {
-            return upper.equals("LOOP_END") || upper.equals("RANDOM_END") || upper.startsWith("END_FOR") || upper.equals("END_PROJECTILE_TRAIL");
+            return upper.equals("LOOP_END")
+                || upper.equals("RANDOM_END")
+                || upper.startsWith("END_FOR")
+                || upper.equals("END_PROJECTILE_TRAIL")
+                || upper.equals("END_HITBOX")
+                || upper.equals("END_TIMER");
         }
 
         private boolean matchesTerminator(String upper, String terminator) {

@@ -1,6 +1,7 @@
 package com.bountysmp.configurableitems;
 
 import com.bountysmp.configurableitems.action.HitscanOptions;
+import com.bountysmp.configurableitems.action.TargetKind;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,7 @@ final class HitscanOptionsTest {
 
         assertTrue(options.errors().isEmpty());
         assertEquals(32, options.distance());
-        assertEquals(HitscanOptions.TargetMode.ENTITY, options.targetMode());
+        assertEquals(TargetKind.ENTITY, options.targetMode());
         assertEquals(1, options.maxHits());
         assertFalse(options.allHits());
         assertEquals("DAMAGE 5", options.body());
@@ -29,7 +30,7 @@ final class HitscanOptionsTest {
         ));
 
         assertTrue(options.errors().isEmpty());
-        assertEquals(HitscanOptions.TargetMode.PLAYER, options.targetMode());
+        assertEquals(TargetKind.PLAYER, options.targetMode());
         assertTrue(options.allHits());
         assertNull(options.maxHits());
         assertEquals("ACTIONBAR &cMarked", options.body());
@@ -42,7 +43,7 @@ final class HitscanOptionsTest {
         ));
 
         assertTrue(options.errors().isEmpty());
-        assertEquals(HitscanOptions.TargetMode.MOB, options.targetMode());
+        assertEquals(TargetKind.MOB, options.targetMode());
         assertEquals("FLAME", options.particle());
         assertEquals(12, options.points());
         assertEquals(0.1, options.offset());

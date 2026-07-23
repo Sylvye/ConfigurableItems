@@ -1,11 +1,15 @@
 package com.bountysmp.configurableitems.action;
 
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.UUID;
+import org.bukkit.util.Vector;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +35,52 @@ final class ActionEngineTest {
 
         assertFalse(ActionEngine.isVeinmineNeighborOffset(0, 0, 0));
         assertFalse(ActionEngine.isVeinmineNeighborOffset(2, 0, 0));
+    }
+
+    @Test
+    void targetKindMatchesConfiguredEntityGroups() {
+        Player player = fake(Player.class, UUID.randomUUID());
+        Entity nonPlayer = fake(Entity.class, UUID.randomUUID());
+        LivingEntity mob = fake(LivingEntity.class, UUID.randomUUID());
+
+        assertTrue(TargetKind.PLAYER.matchesEntity(player));
+        assertFalse(TargetKind.PLAYER.matchesEntity(nonPlayer));
+
+        assertFalse(TargetKind.MOB.matchesEntity(player));
+        assertFalse(TargetKind.MOB.matchesEntity(nonPlayer));
+        assertTrue(TargetKind.MOB.matchesEntity(mob));
+
+        assertTrue(TargetKind.ENTITY.matchesEntity(player));
+        assertTrue(TargetKind.ENTITY.matchesEntity(nonPlayer));
+
+        assertFalse(TargetKind.BLOCK.matchesEntity(player));
+        assertFalse(TargetKind.BLOCK.matchesEntity(nonPlayer));
+    }
+
+    @Test
+    void computesParticleRayDelaysFromRaySpeed() {
+        assertEquals(List.of(0L, 20L, 40L), ActionEngine.particleRayDelays(2.0, 3, 1.0));
+        assertEquals(List.of(0L, 10L, 20L), ActionEngine.particleRayDelays(4.0, 3, 4.0));
+        assertEquals(List.of(0L), ActionEngine.particleRayDelays(10.0, 1, 1.0));
+    }
+
+    @Test
+    void computesImpulseVectors() {
+        assertEquals(new Vector(2, 0, 0), ActionEngine.impulseVector(new Vector(0, 0, 0), new Vector(5, 0, 0), 2, 10, true));
+        assertEquals(new Vector(-1, 0, 0), ActionEngine.impulseVector(new Vector(0, 0, 0), new Vector(5, 0, 0), -2, 10, false));
+    }
+
+    @Test
+    void evaluatesHitboxShapes() {
+        assertTrue(ActionEngine.hitboxIncludes(HitboxOptions.Shape.SPHERE, 2, new Vector(), new Vector(1, 1, 0), new Vector(0, 0, 1)));
+        assertFalse(ActionEngine.hitboxIncludes(HitboxOptions.Shape.CUBE, 2, new Vector(), new Vector(3, 0, 0), new Vector(0, 0, 1)));
+        assertTrue(ActionEngine.hitboxIncludes(HitboxOptions.Shape.CONE, 4, new Vector(), new Vector(0.5, 0, 2), new Vector(0, 0, 1)));
+    }
+
+    @Test
+    void generatesParticleShapeOffsets() {
+        assertEquals(6, ActionEngine.particleShapeOffsets(new ParticleShapeOptions(ParticleShapeOptions.Shape.HEXAGON, 1, 0, 0, 0, 6, List.of())).size());
+        assertEquals(3, ActionEngine.particleShapeOffsets(new ParticleShapeOptions(ParticleShapeOptions.Shape.LINE, 2, 0, 0, 0, 3, List.of())).size());
     }
 
     @SuppressWarnings("unchecked")

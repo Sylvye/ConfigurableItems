@@ -2,6 +2,7 @@ package com.bountysmp.configurableitems.action;
 
 import com.bountysmp.configurableitems.storage.ItemRepository;
 import com.bountysmp.configurableitems.trigger.TriggerContext;
+import com.bountysmp.configurableitems.trigger.ProjectileTracker;
 import com.bountysmp.configurableitems.util.PlaceholderResolver;
 import com.bountysmp.configurableitems.util.TextUtil;
 import com.bountysmp.configurableitems.util.ValidationUtil;
@@ -18,7 +19,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.Predicate;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -32,9 +32,13 @@ import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
@@ -43,20 +47,28 @@ import org.bukkit.util.Vector;
 public final class ActionEngine {
     private static final Set<String> ACTIONS = Set.of(
         "DELAY_TICK", "IF", "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN",
+        "HITBOX", "TIMER", "LAUNCH_PROJECTILE",
         "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DASH",
+        "DAMAGE_ITEM", "TAKE_ITEM", "REPAIR_ITEM", "IMPULSE", "EXPLODE",
         "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "PROJECTILE_TRAIL", "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
     );
 
     private final Plugin plugin;
     private final ItemRepository repository;
     private final ActionConfig config;
+    private final ProjectileTracker projectileTracker;
     private final Random random = new Random();
     private int delayedQueues;
 
     public ActionEngine(Plugin plugin, ItemRepository repository, ActionConfig config) {
+        this(plugin, repository, config, new ProjectileTracker());
+    }
+
+    public ActionEngine(Plugin plugin, ItemRepository repository, ActionConfig config, ProjectileTracker projectileTracker) {
         this.plugin = plugin;
         this.repository = repository;
         this.config = config;
+        this.projectileTracker = projectileTracker;
     }
 
     public boolean isKnownAction(String line) {
@@ -128,6 +140,10 @@ public final class ActionEngine {
                 prepend(queue, expanded);
             } else if (step instanceof ActionStep.ProjectileTrail projectileTrail) {
                 startProjectileTrail(context, projectileTrail);
+            } else if (step instanceof ActionStep.Hitbox hitbox) {
+                runHitbox(context, hitbox);
+            } else if (step instanceof ActionStep.Timer timer) {
+                startTimer(context, timer);
             }
         }
     }
@@ -199,12 +215,11 @@ public final class ActionEngine {
         }
         switch (action) {
             case "IF" -> runIf(context, line.substring(2).trim());
-            case "AROUND" -> runSelector(context, tokens, true, false, line);
-            case "MOB_AROUND" -> runSelector(context, tokens, false, false, line);
-            case "NEAREST" -> runSelector(context, tokens, true, true, line);
-            case "MOB_NEAREST" -> runSelector(context, tokens, false, true, line);
+            case "AROUND", "MOB_AROUND" -> runSelector(context, tokens, false, line);
+            case "NEAREST", "MOB_NEAREST" -> runSelector(context, tokens, true, line);
             case "HITSCAN" -> runHitscan(context, tokens, line);
-            case "DAMAGE" -> livingReceiver(context, tokens, action).damage(doubleArg(tokens, "amount", firstPositionalIndex(tokens), 0.0), context.self());
+            case "LAUNCH_PROJECTILE" -> launchProjectile(context, tokens);
+            case "DAMAGE" -> damage(context, tokens);
             case "HEAL" -> heal(context, tokens);
             case "SET_HEALTH" -> setHealth(context, tokens);
             case "KILL" -> livingReceiver(context, tokens, action).setHealth(0.0);
@@ -213,6 +228,11 @@ public final class ActionEngine {
             case "TELEPORT" -> teleport(context, tokens);
             case "VELOCITY" -> livingReceiver(context, tokens, action).setVelocity(vector(tokens, firstPositionalIndex(tokens)));
             case "DASH" -> context.self().setVelocity(context.self().getLocation().getDirection().normalize().multiply(doubleArg(tokens, "strength", 1, 1.0)));
+            case "DAMAGE_ITEM" -> damageItem(context, tokens);
+            case "TAKE_ITEM" -> takeItem(context, tokens);
+            case "REPAIR_ITEM" -> repairItem(context, tokens);
+            case "IMPULSE" -> impulse(context, tokens);
+            case "EXPLODE" -> explode(context, tokens);
             case "SEND_MESSAGE" -> sendMessage(context, tokens, line.substring(action.length()).trim());
             case "ACTIONBAR" -> actionbar(context, tokens, line.substring(action.length()).trim());
             case "PARTICLE" -> particle(context, tokens);
@@ -240,13 +260,30 @@ public final class ActionEngine {
             Optional<String> condition = renderRequired(context, pieces[0], line);
             return condition.map(value -> "IF " + value + " " + pieces[1]);
         }
-        if (action.equals("AROUND") || action.equals("MOB_AROUND") || action.equals("NEAREST") || action.equals("MOB_NEAREST")) {
+        if (isSelector(action)) {
             List<String> rawTokens = tokens(line);
             if (rawTokens.size() < 2) {
                 return Optional.of(line);
             }
+            int bodyIndex = selectorBodyIndex(rawTokens);
             Optional<String> radius = renderRequired(context, rawTokens.get(1), line);
-            return radius.map(value -> action + " " + value + " " + bodyAfter(rawTokens, 2));
+            if (radius.isEmpty()) {
+                return Optional.empty();
+            }
+            List<String> rendered = new ArrayList<>();
+            rendered.add(rawTokens.getFirst());
+            rendered.add(radius.get());
+            for (int i = 2; i < bodyIndex; i++) {
+                Optional<String> option = renderRequired(context, rawTokens.get(i), line);
+                if (option.isEmpty()) {
+                    return Optional.empty();
+                }
+                rendered.add(option.get());
+            }
+            if (bodyIndex < rawTokens.size()) {
+                rendered.add(bodyAfter(rawTokens, bodyIndex));
+            }
+            return Optional.of(String.join(" ", rendered));
         }
         if (action.equals("HITSCAN")) {
             return prepareHitscanLine(context, line);
@@ -303,25 +340,30 @@ public final class ActionEngine {
         }
     }
 
-    private void runSelector(ActionExecutionContext context, List<String> tokens, boolean players, boolean nearestOnly, String line) {
-        double radius = doubleArg(tokens, 1, 0.0);
-        if (radius > config.warnRadius()) {
-            warn(context.triggerContext(), actionName(line) + " radius " + radius + " exceeds warning threshold " + config.warnRadius());
+    private void runSelector(ActionExecutionContext context, List<String> tokens, boolean nearestOnly, String line) {
+        SelectorSpec spec = SelectorSpec.parse(tokens, actionName(line));
+        for (String error : spec.errors()) {
+            warn(context.triggerContext(), error);
         }
-        String body = bodyAfter(tokens, 2);
-        if (body.isBlank()) {
-            warn(context.triggerContext(), actionName(line) + " is missing an action body");
+        if (!spec.errors().isEmpty()) {
             return;
         }
-        Predicate<Entity> filter = entity -> entity != context.self()
-            && (players ? entity instanceof Player : entity instanceof LivingEntity && !(entity instanceof Player));
+        double radius = doubleArg(tokens, 1, 0.0);
+        if (radius > config.warnRadius()) {
+            warn(context.triggerContext(), spec.action() + " target:" + spec.target().name() + " radius " + radius + " exceeds warning threshold " + config.warnRadius());
+        }
+        String body = spec.body();
+        if (body.isBlank()) {
+            warn(context.triggerContext(), spec.action() + " is missing an action body");
+            return;
+        }
         List<Entity> selected = context.self().getNearbyEntities(radius, radius, radius).stream()
-            .filter(filter)
+            .filter(entity -> !sameEntity(entity, context.self()) && spec.target().matchesEntity(entity))
             .filter(entity -> entity.getLocation().distanceSquared(context.self().getLocation()) <= radius * radius)
             .sorted(Comparator.comparingDouble(entity -> entity.getLocation().distanceSquared(context.self().getLocation())))
             .toList();
         if (selected.size() > config.warnSelectedEntities()) {
-            warn(context.triggerContext(), actionName(line) + " selected " + selected.size() + " entities, threshold " + config.warnSelectedEntities());
+            warn(context.triggerContext(), spec.action() + " target:" + spec.target().name() + " selected " + selected.size() + " entities, threshold " + config.warnSelectedEntities());
         }
         if (nearestOnly && !selected.isEmpty()) {
             selected = List.of(selected.getFirst());
@@ -361,10 +403,10 @@ public final class ActionEngine {
         RayHit blockHit = blockTrace == null || blockTrace.getHitBlock() == null
             ? null
             : new RayHit(null, blockTrace.getHitBlock(), blockTrace.getHitPosition().toLocation(context.self().getWorld()), blockTrace.getHitPosition().distance(context.self().getEyeLocation().toVector()), HitKind.BLOCK);
-        List<RayHit> hits = options.targetMode() == HitscanOptions.TargetMode.BLOCK
+        List<RayHit> hits = options.targetMode() == TargetKind.BLOCK
             ? (blockHit == null ? List.of() : List.of(blockHit))
             : rayEntities(context.self(), options.distance(), blockHit == null ? options.distance() : blockHit.projection(), options.targetMode());
-        int selectedCount = options.targetMode() == HitscanOptions.TargetMode.BLOCK
+        int selectedCount = options.targetMode() == TargetKind.BLOCK
             ? Math.min(1, hits.size())
             : options.allHits() ? hits.size() : Math.min(options.maxHits(), hits.size());
         Location particleEnd = context.self().getEyeLocation().clone().add(context.self().getEyeLocation().getDirection().normalize().multiply(options.distance()));
@@ -414,12 +456,12 @@ public final class ActionEngine {
         }, delayTicks);
     }
 
-    private List<RayHit> rayEntities(Player player, int distance, double maxProjection, HitscanOptions.TargetMode targetMode) {
+    private List<RayHit> rayEntities(Player player, int distance, double maxProjection, TargetKind targetMode) {
         Location eye = player.getEyeLocation();
         Vector direction = eye.getDirection().normalize();
         List<RayHit> hits = new ArrayList<>();
         for (Entity entity : player.getNearbyEntities(distance, distance, distance)) {
-            if (!matchesHitscanTarget(entity, targetMode) || sameEntity(entity, player)) {
+            if (!targetMode.matchesEntity(entity) || sameEntity(entity, player)) {
                 continue;
             }
             Location hitLocation = entity.getLocation().add(0, entity.getHeight() / 2.0, 0);
@@ -434,15 +476,6 @@ public final class ActionEngine {
             }
         }
         return hits.stream().sorted(Comparator.comparingDouble(RayHit::projection)).toList();
-    }
-
-    private boolean matchesHitscanTarget(Entity entity, HitscanOptions.TargetMode targetMode) {
-        return switch (targetMode) {
-            case PLAYER -> entity instanceof Player;
-            case MOB -> entity instanceof LivingEntity && !(entity instanceof Player);
-            case ENTITY -> true;
-            case BLOCK -> false;
-        };
     }
 
     private void drawParticleRay(TriggerContext context, Location start, Location end, Particle particle, int points, double offset, double speed, String raySpeed) {
@@ -506,6 +539,244 @@ public final class ActionEngine {
     private record RayHit(Entity entity, Block block, Location location, double projection, HitKind kind) {
     }
 
+    private void launchProjectile(ActionExecutionContext context, List<String> tokens) {
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start) {
+            warn(context.triggerContext(), "LAUNCH_PROJECTILE requires projectile type");
+            return;
+        }
+        EntityType type;
+        try {
+            type = EntityType.valueOf(tokens.get(start).toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            warn(context.triggerContext(), "Invalid projectile type: " + tokens.get(start));
+            return;
+        }
+        Location startLocation = context.self().getEyeLocation().clone();
+        boolean track = booleanArg(tokens, "track", true);
+        projectileTracker.suppressNextLaunch(context.self(), track ? context.triggerContext().itemId() : "");
+        Entity spawned = startLocation.getWorld().spawnEntity(startLocation, type);
+        if (!(spawned instanceof Projectile projectile)) {
+            spawned.remove();
+            warn(context.triggerContext(), "LAUNCH_PROJECTILE type is not a projectile: " + tokens.get(start));
+            return;
+        }
+        double speed = doubleArg(tokens, "speed", start + 1, 1.5);
+        projectile.setShooter(context.self());
+        projectile.setVelocity(startLocation.getDirection().normalize().multiply(speed));
+        projectile.setGravity(booleanArg(tokens, "gravity", true));
+        context.projectile(projectile);
+        if (track) {
+            projectileTracker.track(projectile, context.triggerContext().itemId());
+        }
+    }
+
+    private void damage(ActionExecutionContext context, List<String> tokens) {
+        LivingEntity target = livingReceiver(context, tokens, "DAMAGE");
+        if (target == null) {
+            return;
+        }
+        double amount = doubleArg(tokens, "amount", firstPositionalIndex(tokens), 0.0);
+        String type = Optional.ofNullable(keyArg(tokens, "type")).orElse("normal");
+        if (type.equalsIgnoreCase("true")) {
+            target.setHealth(Math.max(0.0, target.getHealth() - Math.max(0.0, amount)));
+            return;
+        }
+        if (!type.equalsIgnoreCase("normal")) {
+            warn(context.triggerContext(), "DAMAGE type must be normal or true: " + type);
+            return;
+        }
+        target.damage(amount, context.self());
+    }
+
+    private void damageItem(ActionExecutionContext context, List<String> tokens) {
+        Player player = playerReceiver(context, tokens, "DAMAGE_ITEM");
+        if (player == null) {
+            return;
+        }
+        int start = firstPositionalIndex(tokens);
+        int amount = Math.max(1, intArg(tokens, start, 1));
+        damageInventoryItem(context, player, keyArg(tokens, "item"), amount);
+    }
+
+    private void takeItem(ActionExecutionContext context, List<String> tokens) {
+        Player player = playerReceiver(context, tokens, "TAKE_ITEM");
+        if (player == null) {
+            return;
+        }
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start) {
+            warn(context.triggerContext(), "TAKE_ITEM requires SELF or material");
+            return;
+        }
+        String item = tokens.get(start);
+        int amount = Math.max(1, intArg(tokens, start + 1, 1));
+        if (item.equalsIgnoreCase("SELF")) {
+            ItemStack stack = preferredHeldItem(player);
+            if (stack == null) {
+                warn(context.triggerContext(), "TAKE_ITEM SELF found no held item");
+                return;
+            }
+            stack.setAmount(Math.max(0, stack.getAmount() - amount));
+            return;
+        }
+        ValidationUtil.material(item).ifPresentOrElse(
+            material -> player.getInventory().removeItem(new ItemStack(material, amount)),
+            () -> warn(context.triggerContext(), "Invalid item material: " + item)
+        );
+    }
+
+    private void repairItem(ActionExecutionContext context, List<String> tokens) {
+        Player player = playerReceiver(context, tokens, "REPAIR_ITEM");
+        if (player == null) {
+            return;
+        }
+        int start = firstPositionalIndex(tokens);
+        String amountToken = token(tokens, start, "full");
+        String itemArg = keyArg(tokens, "item");
+        if (itemArg == null && tokens.size() > start + 1) {
+            itemArg = tokens.get(start + 1);
+        }
+        ItemStack stack = itemStackArg(context, player, itemArg, "REPAIR_ITEM");
+        if (stack == null) {
+            return;
+        }
+        ItemMeta meta = stack.getItemMeta();
+        if (!(meta instanceof Damageable damageable)) {
+            return;
+        }
+        if (amountToken.equalsIgnoreCase("full")) {
+            damageable.setDamage(0);
+        } else {
+            damageable.setDamage(Math.max(0, damageable.getDamage() - Math.max(1, intValue(amountToken, 1))));
+        }
+        stack.setItemMeta(meta);
+    }
+
+    private void damageInventoryItem(ActionExecutionContext context, Player player, String rawItem, int amount) {
+        if (rawItem == null || rawItem.isBlank() || rawItem.equalsIgnoreCase("SELF")) {
+            ItemStack stack = preferredHeldItem(player);
+            if (stack == null) {
+                warn(context.triggerContext(), "DAMAGE_ITEM SELF found no held item");
+                return;
+            }
+            if (stack == player.getInventory().getItemInOffHand()) {
+                player.getInventory().setItemInOffHand(stack.damage(amount, player));
+            } else {
+                player.getInventory().setItemInMainHand(stack.damage(amount, player));
+            }
+            return;
+        }
+        Optional<Material> material = ValidationUtil.material(rawItem);
+        if (material.isEmpty()) {
+            warn(context.triggerContext(), "Invalid item material: " + rawItem);
+            return;
+        }
+        for (int i = 0; i < player.getInventory().getSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack != null && stack.getType() == material.get()) {
+                player.getInventory().setItem(i, stack.damage(amount, player));
+                return;
+            }
+        }
+    }
+
+    private ItemStack itemStackArg(ActionExecutionContext context, Player player, String rawItem, String action) {
+        if (rawItem == null || rawItem.isBlank() || rawItem.equalsIgnoreCase("SELF")) {
+            ItemStack stack = preferredHeldItem(player);
+            if (stack == null) {
+                warn(context.triggerContext(), action + " SELF found no held item");
+            }
+            return stack;
+        }
+        Optional<Material> material = ValidationUtil.material(rawItem);
+        if (material.isEmpty()) {
+            return null;
+        }
+        for (ItemStack stack : player.getInventory().getContents()) {
+            if (stack != null && stack.getType() == material.get()) {
+                return stack;
+            }
+        }
+        return null;
+    }
+
+    private ItemStack preferredHeldItem(Player player) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (main != null && !main.getType().isAir()) {
+            return main;
+        }
+        ItemStack offhand = player.getInventory().getItemInOffHand();
+        return offhand != null && !offhand.getType().isAir() ? offhand : null;
+    }
+
+    private void impulse(ActionExecutionContext context, List<String> tokens) {
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start + 2) {
+            warn(context.triggerContext(), "IMPULSE requires x y z");
+            return;
+        }
+        Location origin = new Location(
+            context.location().getWorld(),
+            doubleArg(tokens, start, 0.0),
+            doubleArg(tokens, start + 1, 0.0),
+            doubleArg(tokens, start + 2, 0.0)
+        );
+        double power = doubleArg(tokens, "power", start + 3, 1.0);
+        double radius = Math.max(0.000001, doubleArg(tokens, "radius", start + 4, 8.0));
+        boolean normalize = booleanArg(tokens, "normalize", true);
+        for (Entity entity : impulseTargets(context, Optional.ofNullable(keyArg(tokens, "targets")).orElse("CURRENT"), radius)) {
+            Vector velocity = impulseVector(origin.toVector(), entity.getLocation().toVector(), power, radius, normalize);
+            if (velocity.lengthSquared() > 0.0) {
+                entity.setVelocity(velocity);
+            }
+        }
+    }
+
+    private List<Entity> impulseTargets(ActionExecutionContext context, String rawTargets, double radius) {
+        List<Entity> selected = new ArrayList<>();
+        for (String raw : rawTargets.split(",")) {
+            switch (raw.trim().toUpperCase(Locale.ROOT)) {
+                case "SELF" -> selected.add(context.self());
+                case "TARGET", "CURRENT" -> {
+                    if (context.target() != null) {
+                        selected.add(context.target());
+                    }
+                }
+                case "PLAYERS" -> selected.addAll(context.self().getNearbyEntities(radius, radius, radius).stream().filter(Player.class::isInstance).toList());
+                case "MOBS" -> selected.addAll(context.self().getNearbyEntities(radius, radius, radius).stream().filter(entity -> entity instanceof LivingEntity && !(entity instanceof Player)).toList());
+                case "ENTITIES" -> selected.addAll(context.self().getNearbyEntities(radius, radius, radius));
+                default -> {}
+            }
+        }
+        return selected.stream().distinct().toList();
+    }
+
+    static Vector impulseVector(Vector origin, Vector target, double power, double radius, boolean normalize) {
+        Vector direction = target.clone().subtract(origin);
+        double distance = direction.length();
+        if (distance <= 0.000001) {
+            return new Vector();
+        }
+        double strength = normalize ? power : power * Math.max(0.0, 1.0 - distance / Math.max(0.000001, radius));
+        return direction.normalize().multiply(strength);
+    }
+
+    private void explode(ActionExecutionContext context, List<String> tokens) {
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start + 3) {
+            warn(context.triggerContext(), "EXPLODE requires power x y z");
+            return;
+        }
+        World world = tokens.size() > start + 4 ? Bukkit.getWorld(tokens.get(start + 4)) : context.location().getWorld();
+        if (world == null) {
+            warn(context.triggerContext(), "EXPLODE world not found: " + tokens.get(start + 4));
+            return;
+        }
+        Location location = new Location(world, doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0), doubleArg(tokens, start + 3, 0.0));
+        world.createExplosion(location, (float) doubleArg(tokens, start, 1.0), booleanArg(tokens, "fire", false), booleanArg(tokens, "break-blocks", true), context.self());
+    }
+
     private void heal(ActionExecutionContext context, List<String> tokens) {
         LivingEntity target = livingReceiver(context, tokens, "HEAL");
         if (target == null) {
@@ -553,7 +824,7 @@ public final class ActionEngine {
         if (toArg != null) {
             Location destination = locationArg(context, toArg, "TELEPORT");
             if (destination != null) {
-                receiver.teleport(destination);
+                teleportReceiver(context, receiver, destination, tokens);
             }
             return;
         }
@@ -571,7 +842,51 @@ public final class ActionEngine {
             warn(context.triggerContext(), "TELEPORT world not found: " + tokens.get(start + 3));
             return;
         }
-        receiver.teleport(new Location(world, doubleArg(tokens, start, 0.0), doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0)));
+        teleportReceiver(context, receiver, new Location(world, doubleArg(tokens, start, 0.0), doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0)), tokens);
+    }
+
+    private void teleportReceiver(ActionExecutionContext context, LivingEntity receiver, Location destination, List<String> tokens) {
+        if (!booleanArg(tokens, "safe", false)) {
+            receiver.teleport(destination);
+            return;
+        }
+        Location safe = safeTeleportLocation(destination);
+        if (safe == null) {
+            warn(context.triggerContext(), "TELEPORT safe:true found no safe destination near " + destination.getBlockX() + "," + destination.getBlockY() + "," + destination.getBlockZ());
+            return;
+        }
+        receiver.teleport(safe);
+    }
+
+    static Location safeTeleportLocation(Location destination) {
+        World world = destination.getWorld();
+        if (world == null) {
+            return null;
+        }
+        int baseX = destination.getBlockX();
+        int baseY = Math.max(world.getMinHeight(), Math.min(world.getMaxHeight() - 2, destination.getBlockY()));
+        int baseZ = destination.getBlockZ();
+        for (int radius = 0; radius <= 2; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dy = -2; dy <= 2; dy++) {
+                        int y = baseY + dy;
+                        if (y <= world.getMinHeight() || y >= world.getMaxHeight() - 1) {
+                            continue;
+                        }
+                        Block feet = world.getBlockAt(baseX + dx, y, baseZ + dz);
+                        Block head = world.getBlockAt(baseX + dx, y + 1, baseZ + dz);
+                        Block floor = world.getBlockAt(baseX + dx, y - 1, baseZ + dz);
+                        if ((feet.isPassable() || feet.getType().isAir())
+                            && (head.isPassable() || head.getType().isAir())
+                            && floor.getType().isSolid()) {
+                            return new Location(world, baseX + dx + 0.5, y, baseZ + dz + 0.5, destination.getYaw(), destination.getPitch());
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private Vector vector(List<String> tokens, int start) {
@@ -705,6 +1020,17 @@ public final class ActionEngine {
         if (location == null) {
             return;
         }
+        ParticleShapeOptions shape = ParticleShapeOptions.parse(tokens);
+        for (String error : shape.errors()) {
+            warn(context.triggerContext(), error);
+        }
+        if (shape.shape() != ParticleShapeOptions.Shape.POINT) {
+            for (Vector vector : particleShapeOffsets(shape)) {
+                Location point = location.clone().add(vector);
+                point.getWorld().spawnParticle(particle, point, count, offset, offset, offset, speed);
+            }
+            return;
+        }
         location.getWorld().spawnParticle(particle, location, count, offset, offset, offset, speed);
     }
 
@@ -750,13 +1076,82 @@ public final class ActionEngine {
         }
     }
 
+    static List<Vector> particleShapeOffsets(ParticleShapeOptions options) {
+        double size = Math.max(0.0, options.size());
+        int points = Math.max(1, options.points());
+        List<Vector> vectors = new ArrayList<>();
+        switch (options.shape()) {
+            case POINT -> vectors.add(new Vector());
+            case LINE -> {
+                double step = points == 1 ? 0.0 : size / (points - 1);
+                for (int i = 0; i < points; i++) {
+                    vectors.add(new Vector(-size / 2.0 + step * i, 0, 0));
+                }
+            }
+            case CIRCLE -> {
+                for (int i = 0; i < points; i++) {
+                    double angle = (Math.PI * 2.0 * i) / points;
+                    vectors.add(new Vector(Math.cos(angle) * size, 0, Math.sin(angle) * size));
+                }
+            }
+            case TRIANGLE, SQUARE, PENTAGON, HEXAGON, SEPTAGON, OCTAGON, NONAGON, DECAGON -> {
+                int sides = options.shape().sides();
+                int perSide = Math.max(1, points / sides);
+                List<Vector> corners = new ArrayList<>();
+                for (int i = 0; i < sides; i++) {
+                    double angle = (Math.PI * 2.0 * i) / sides;
+                    corners.add(new Vector(Math.cos(angle) * size, 0, Math.sin(angle) * size));
+                }
+                for (int i = 0; i < sides; i++) {
+                    Vector a = corners.get(i);
+                    Vector b = corners.get((i + 1) % sides);
+                    for (int p = 0; p < perSide; p++) {
+                        double t = perSide == 1 ? 0.0 : (double) p / perSide;
+                        vectors.add(a.clone().multiply(1.0 - t).add(b.clone().multiply(t)));
+                    }
+                }
+            }
+        }
+        return vectors.stream().map(vector -> rotate(vector, options.rotX(), options.rotY(), options.rotZ())).toList();
+    }
+
+    private static Vector rotate(Vector input, double rotX, double rotY, double rotZ) {
+        double xRad = Math.toRadians(rotX);
+        double yRad = Math.toRadians(rotY);
+        double zRad = Math.toRadians(rotZ);
+        double x = input.getX();
+        double y = input.getY();
+        double z = input.getZ();
+        double cos = Math.cos(xRad);
+        double sin = Math.sin(xRad);
+        double y1 = y * cos - z * sin;
+        double z1 = y * sin + z * cos;
+        y = y1;
+        z = z1;
+        cos = Math.cos(yRad);
+        sin = Math.sin(yRad);
+        double x1 = x * cos + z * sin;
+        z1 = -x * sin + z * cos;
+        x = x1;
+        z = z1;
+        cos = Math.cos(zRad);
+        sin = Math.sin(zRad);
+        x1 = x * cos - y * sin;
+        y1 = x * sin + y * cos;
+        return new Vector(x1, y1, z);
+    }
+
     private void startProjectileTrail(ActionExecutionContext context, ActionStep.ProjectileTrail trail) {
-        Entity projectile = context.triggerContext().projectile();
+        Entity projectile = context.projectile();
         if (projectile == null) {
             warn(context.triggerContext(), "PROJECTILE_TRAIL requires a projectile context");
             return;
         }
-        ProjectileTrailOptions options = ProjectileTrailOptions.parse(tokens(trail.header()));
+        Optional<String> renderedHeader = renderRequired(context, trail.header(), trail.header());
+        if (renderedHeader.isEmpty()) {
+            return;
+        }
+        ProjectileTrailOptions options = ProjectileTrailOptions.parse(tokens(renderedHeader.get()));
         if (!options.errors().isEmpty()) {
             options.errors().forEach(error -> warn(context.triggerContext(), error));
             return;
@@ -798,6 +1193,201 @@ public final class ActionEngine {
         for (int i = 0; i < safePoints; i++) {
             Location point = previous.clone().add(direction.clone().multiply(step * i));
             point.getWorld().spawnParticle(particle, point, count, offset, offset, offset, speed);
+        }
+    }
+
+    private void startTimer(ActionExecutionContext context, ActionStep.Timer timer) {
+        Optional<String> renderedHeader = renderRequired(context, timer.header(), timer.header());
+        if (renderedHeader.isEmpty()) {
+            return;
+        }
+        TimerOptions options = TimerOptions.parse(tokens(renderedHeader.get()));
+        if (!options.errors().isEmpty()) {
+            options.errors().forEach(error -> warn(context.triggerContext(), error));
+            return;
+        }
+        new BukkitRunnable() {
+            private int ticks;
+
+            @Override
+            public void run() {
+                if (!context.self().isOnline() || repository.get(context.triggerContext().itemId()) == null || ticks > options.duration()) {
+                    cancel();
+                    return;
+                }
+                ActionExecutionContext scoped = context.copy();
+                scoped.putVariable("TICKS", String.valueOf(ticks));
+                runQueue(scoped, new ArrayDeque<>(timer.body()));
+                ticks += options.interval();
+            }
+        }.runTaskTimer(plugin, 0L, options.interval());
+    }
+
+    private void runHitbox(ActionExecutionContext context, ActionStep.Hitbox hitbox) {
+        Optional<String> renderedHeader = renderRequired(context, hitbox.header(), hitbox.header());
+        if (renderedHeader.isEmpty()) {
+            return;
+        }
+        HitboxOptions options = HitboxOptions.parse(tokens(renderedHeader.get()));
+        if (!options.errors().isEmpty()) {
+            options.errors().forEach(error -> warn(context.triggerContext(), error));
+            return;
+        }
+        Location center = locationArg(context, options.at(), "HITBOX");
+        if (center == null) {
+            return;
+        }
+        Location hitboxCenter = center.clone();
+        List<Entity> nearby = hitboxCenter.getWorld().getNearbyEntities(hitboxCenter, options.size(), options.size(), options.size()).stream()
+            .filter(entity -> !sameEntity(entity, context.self()))
+            .filter(entity -> hitboxIncludes(options.shape(), options.size(), hitboxCenter.toVector(), entity.getLocation().toVector(), context.self().getEyeLocation().getDirection()))
+            .sorted(Comparator.comparingDouble(entity -> entity.getLocation().distanceSquared(hitboxCenter)))
+            .toList();
+        runHitboxEntities(context, hitbox, options, hitboxCenter, nearby);
+        runHitboxBlocks(context, hitbox, options, hitboxCenter);
+        drawHitboxEdges(context, options, hitboxCenter);
+    }
+
+    private void runHitboxEntities(ActionExecutionContext context, ActionStep.Hitbox hitbox, HitboxOptions options, Location center, List<Entity> nearby) {
+        int players = 0;
+        int entities = 0;
+        for (Entity entity : nearby) {
+            boolean player = entity instanceof Player;
+            boolean entityAllowed = options.targets().contains(TargetKind.ENTITY) || options.targets().contains(TargetKind.MOB) && TargetKind.MOB.matchesEntity(entity);
+            if (player && !options.targets().contains(TargetKind.PLAYER)) {
+                continue;
+            }
+            if (!player && !entityAllowed) {
+                continue;
+            }
+            if (player && players++ >= options.maxPlayers()) {
+                continue;
+            }
+            if (!player && entities++ >= options.maxEntities()) {
+                continue;
+            }
+            ActionExecutionContext scoped = context.copy();
+            scoped.target(entity);
+            scoped.hitEntity(entity, entity.getLocation());
+            runQueue(scoped, new ArrayDeque<>(hitbox.body()));
+        }
+    }
+
+    private void runHitboxBlocks(ActionExecutionContext context, ActionStep.Hitbox hitbox, HitboxOptions options, Location center) {
+        if (!options.targets().contains(TargetKind.BLOCK) || options.maxBlocks() <= 0) {
+            return;
+        }
+        int radius = (int) Math.ceil(options.size());
+        List<Block> blocks = new ArrayList<>();
+        Vector direction = context.self().getEyeLocation().getDirection();
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    Block block = center.getWorld().getBlockAt(center.getBlockX() + x, center.getBlockY() + y, center.getBlockZ() + z);
+                    if (block.getType().isAir()) {
+                        continue;
+                    }
+                    if (hitboxIncludes(options.shape(), options.size(), center.toVector(), block.getLocation().add(0.5, 0.5, 0.5).toVector(), direction)) {
+                        blocks.add(block);
+                    }
+                }
+            }
+        }
+        blocks.stream()
+            .sorted(Comparator.comparingDouble(block -> block.getLocation().distanceSquared(center)))
+            .limit(options.maxBlocks())
+            .forEach(block -> {
+                ActionExecutionContext scoped = context.copy();
+                scoped.block(block);
+                scoped.hitBlock(block, block.getLocation().add(0.5, 0.5, 0.5));
+                scoped.clearTarget();
+                runQueue(scoped, new ArrayDeque<>(hitbox.body()));
+            });
+    }
+
+    private void drawHitboxEdges(ActionExecutionContext context, HitboxOptions options, Location center) {
+        if (!options.edgeParticles() || options.particle().isBlank()) {
+            return;
+        }
+        Particle particle = HitboxOptions.particleType(options.particle());
+        if (particle == null) {
+            warn(context.triggerContext(), "Unknown HITBOX particle: " + options.particle());
+            return;
+        }
+        for (Vector offset : hitboxEdgeOffsets(options)) {
+            Location point = center.clone().add(offset);
+            point.getWorld().spawnParticle(particle, point, 1, 0, 0, 0, 0);
+        }
+    }
+
+    static boolean hitboxIncludes(HitboxOptions.Shape shape, double size, Vector center, Vector point, Vector direction) {
+        Vector relative = point.clone().subtract(center);
+        return switch (shape) {
+            case SPHERE -> relative.lengthSquared() <= size * size;
+            case CUBE -> Math.abs(relative.getX()) <= size && Math.abs(relative.getY()) <= size && Math.abs(relative.getZ()) <= size;
+            case CONE -> {
+                Vector dir = direction.lengthSquared() == 0.0 ? new Vector(0, 0, 1) : direction.clone().normalize();
+                double projection = relative.dot(dir);
+                if (projection < 0 || projection > size) {
+                    yield false;
+                }
+                double allowedRadius = (projection / size) * size;
+                double perpendicular = relative.clone().subtract(dir.multiply(projection)).length();
+                yield perpendicular <= allowedRadius;
+            }
+        };
+    }
+
+    static List<Vector> hitboxEdgeOffsets(HitboxOptions options) {
+        return switch (options.shape()) {
+            case SPHERE -> particleShapeOffsets(new ParticleShapeOptions(ParticleShapeOptions.Shape.CIRCLE, options.size(), 0, 0, 0, options.points(), List.of()));
+            case CUBE -> cubeEdgeOffsets(options.size(), options.points());
+            case CONE -> coneEdgeOffsets(options.size(), options.points());
+        };
+    }
+
+    private static List<Vector> cubeEdgeOffsets(double size, int points) {
+        List<Vector> output = new ArrayList<>();
+        double[] signs = {-size, size};
+        int perEdge = Math.max(2, points / 12);
+        for (double y : signs) {
+            for (double z : signs) {
+                addLine(output, new Vector(-size, y, z), new Vector(size, y, z), perEdge);
+            }
+        }
+        for (double x : signs) {
+            for (double z : signs) {
+                addLine(output, new Vector(x, -size, z), new Vector(x, size, z), perEdge);
+            }
+        }
+        for (double x : signs) {
+            for (double y : signs) {
+                addLine(output, new Vector(x, y, -size), new Vector(x, y, size), perEdge);
+            }
+        }
+        return output;
+    }
+
+    private static List<Vector> coneEdgeOffsets(double size, int points) {
+        List<Vector> output = new ArrayList<>();
+        int circlePoints = Math.max(8, points);
+        for (Vector base : particleShapeOffsets(new ParticleShapeOptions(ParticleShapeOptions.Shape.CIRCLE, size, 0, 0, 0, circlePoints, List.of()))) {
+            base.setZ(base.getZ() + size);
+            output.add(base);
+        }
+        Vector tip = new Vector();
+        int perSide = Math.max(2, points / 8);
+        for (int i = 0; i < 8; i++) {
+            double angle = Math.PI * 2.0 * i / 8.0;
+            addLine(output, tip, new Vector(Math.cos(angle) * size, 0, Math.sin(angle) * size + size), perSide);
+        }
+        return output;
+    }
+
+    private static void addLine(List<Vector> output, Vector a, Vector b, int points) {
+        for (int i = 0; i < points; i++) {
+            double t = points == 1 ? 0.0 : (double) i / (points - 1);
+            output.add(a.clone().multiply(1.0 - t).add(b.clone().multiply(t)));
         }
     }
 
@@ -1016,6 +1606,22 @@ public final class ActionEngine {
         return String.join(" ", tokens.subList(start, tokens.size()));
     }
 
+    private static boolean isSelector(String action) {
+        return action.equals("AROUND") || action.equals("MOB_AROUND") || action.equals("NEAREST") || action.equals("MOB_NEAREST");
+    }
+
+    private static boolean isSelectorOption(String token) {
+        return token != null && token.toLowerCase(Locale.ROOT).startsWith("target:");
+    }
+
+    private static int selectorBodyIndex(List<String> tokens) {
+        int index = 2;
+        while (index < tokens.size() && isSelectorOption(tokens.get(index))) {
+            index++;
+        }
+        return index;
+    }
+
     private static int intArg(List<String> tokens, int index, int fallback) {
         if (tokens.size() <= index) {
             return fallback;
@@ -1092,5 +1698,26 @@ public final class ActionEngine {
 
     private static String token(List<String> tokens, int index, String fallback) {
         return tokens.size() > index ? tokens.get(index) : fallback;
+    }
+
+    private record SelectorSpec(String action, TargetKind target, String body, List<String> errors) {
+        static SelectorSpec parse(List<String> tokens, String rawAction) {
+            String upper = rawAction.toUpperCase(Locale.ROOT);
+            String action = upper.equals("MOB_AROUND") ? "AROUND" : upper.equals("MOB_NEAREST") ? "NEAREST" : upper;
+            TargetKind target = upper.startsWith("MOB_") ? TargetKind.MOB : TargetKind.PLAYER;
+            List<String> errors = new ArrayList<>();
+            int index = 2;
+            while (index < tokens.size() && isSelectorOption(tokens.get(index))) {
+                String value = tokens.get(index).substring(tokens.get(index).indexOf(':') + 1);
+                Optional<TargetKind> parsed = TargetKind.parse(value);
+                if (parsed.isEmpty() || parsed.get() == TargetKind.BLOCK) {
+                    errors.add(action + " target must be " + TargetKind.allowedValues(false) + ": " + value);
+                } else {
+                    target = parsed.get();
+                }
+                index++;
+            }
+            return new SelectorSpec(action, target, bodyAfter(tokens, index), List.copyOf(errors));
+        }
     }
 }

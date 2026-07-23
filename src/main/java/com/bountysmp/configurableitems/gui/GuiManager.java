@@ -3,8 +3,11 @@ package com.bountysmp.configurableitems.gui;
 import com.bountysmp.configurableitems.action.ActionFormatter;
 import com.bountysmp.configurableitems.action.ActionParser;
 import com.bountysmp.configurableitems.action.ActionValidator;
+import com.bountysmp.configurableitems.action.HitboxOptions;
 import com.bountysmp.configurableitems.action.HitscanOptions;
+import com.bountysmp.configurableitems.action.TimerOptions;
 import com.bountysmp.configurableitems.action.ProjectileTrailOptions;
+import com.bountysmp.configurableitems.action.TargetKind;
 import com.bountysmp.configurableitems.action.VeinmineOptions;
 import com.bountysmp.configurableitems.item.ItemFactory;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
@@ -482,6 +485,12 @@ public final class GuiManager implements Listener {
             openActionEditor(player, item, type, editIndex, draft, cancel);
             return;
         }
+        if (param.kind() == ParamKind.SELECTOR_TARGET) {
+            draft.put(param.key(), next(draft.value(param.key()), "PLAYER", "MOB", "ENTITY"));
+            upsertActionDraft(item, type, editIndex, draft);
+            openActionEditor(player, item, type, editIndex, draft, cancel);
+            return;
+        }
         if (param.kind() == ParamKind.VEINMINE_MODE) {
             draft.put(param.key(), next(draft.value(param.key()), "DESTROY", "REPLACE"));
             upsertActionDraft(item, type, editIndex, draft);
@@ -647,6 +656,13 @@ public final class GuiManager implements Listener {
             openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
             return;
         }
+        if (param.kind() == ParamKind.SELECTOR_TARGET) {
+            nested.put(param.key(), next(nested.value(param.key()), "PLAYER", "MOB", "ENTITY"));
+            updateNestedLine(parent, bodyIndex, nested);
+            parentChanged.run();
+            openNestedActionEditor(player, item, type, editIndex, parent, bodyIndex, nested, cancel, parentBackToAction, parentChanged);
+            return;
+        }
         if (param.kind() == ParamKind.VEINMINE_MODE) {
             nested.put(param.key(), next(nested.value(param.key()), "DESTROY", "REPLACE"));
             updateNestedLine(parent, bodyIndex, nested);
@@ -745,10 +761,11 @@ public final class GuiManager implements Listener {
                 }
                 replaceBody(draft, lines, 1, lines.size() - 1);
             }
-            case "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST" -> {
+            case "AROUND", "NEAREST" -> {
                 draft.put("radius", token(tokens, 1, draft.value("radius")));
+                draft.put("target", selectorTarget(tokens, firstToken(line)));
                 draft.body().clear();
-                draft.body().addAll(ActionParser.splitInline(restAfter(line, 2)));
+                draft.body().addAll(ActionParser.splitInline(bodyAfter(tokens, selectorBodyIndex(tokens))));
             }
             case "HITSCAN" -> {
                 HitscanOptions options = HitscanOptions.parse(tokens);
@@ -774,9 +791,32 @@ public final class GuiManager implements Listener {
                 draft.put("speed", String.valueOf(options.speed()));
                 replaceBody(draft, lines, 1, lines.size() - 1);
             }
+            case "HITBOX" -> {
+                HitboxOptions options = HitboxOptions.parse(tokens);
+                draft.put("shape", options.shape().name());
+                draft.put("size", String.valueOf(options.size()));
+                draft.put("at", options.at());
+                draft.put("targets", String.join(",", options.targets().stream().map(Enum::name).toList()));
+                draft.put("maxPlayers", String.valueOf(options.maxPlayers()));
+                draft.put("maxEntities", String.valueOf(options.maxEntities()));
+                draft.put("maxBlocks", String.valueOf(options.maxBlocks()));
+                draft.put("particle", options.particle());
+                draft.put("edgeParticles", String.valueOf(options.edgeParticles()));
+                draft.put("points", String.valueOf(options.points()));
+                replaceBody(draft, lines, 1, lines.size() - 1);
+            }
+            case "TIMER" -> {
+                TimerOptions options = TimerOptions.parse(tokens);
+                draft.put("duration", String.valueOf(options.duration()));
+                draft.put("interval", String.valueOf(options.interval()));
+                replaceBody(draft, lines, 1, lines.size() - 1);
+            }
             case "DAMAGE", "SET_HEALTH" -> {
                 draft.put("amount", tokenOrKey(tokens, "amount", firstValueIndex(tokens), draft.value("amount")));
                 draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
+                if (spec.name().equals("DAMAGE")) {
+                    draft.put("damageType", keyArg(tokens, "type", draft.value("damageType")).toUpperCase(Locale.ROOT));
+                }
             }
             case "HEAL" -> {
                 draft.put("amount", tokenOrKey(tokens, "amount", firstValueIndex(tokens), draft.value("amount")));
@@ -792,6 +832,13 @@ public final class GuiManager implements Listener {
                 draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
             }
             case "TELEPORT" -> parseTeleport(draft, tokens);
+            case "LAUNCH_PROJECTILE" -> {
+                int start = firstValueIndex(tokens);
+                draft.put("projectile", token(tokens, start, draft.value("projectile")).toUpperCase(Locale.ROOT));
+                draft.put("speed", keyArg(tokens, "speed", token(tokens, start + 1, draft.value("speed"))));
+                draft.put("gravity", keyArg(tokens, "gravity", draft.value("gravity")));
+                draft.put("track", keyArg(tokens, "track", draft.value("track")));
+            }
             case "VELOCITY" -> {
                 int start = firstValueIndex(tokens);
                 draft.put("x", token(tokens, start, draft.value("x")));
@@ -800,6 +847,43 @@ public final class GuiManager implements Listener {
                 draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
             }
             case "DASH" -> draft.put("strength", tokenOrKey(tokens, "strength", 1, draft.value("strength")));
+            case "DAMAGE_ITEM" -> {
+                draft.put("amount", token(tokens, firstValueIndex(tokens), draft.value("amount")));
+                draft.put("item", keyArg(tokens, "item", draft.value("item")).toUpperCase(Locale.ROOT));
+                draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
+            }
+            case "TAKE_ITEM" -> {
+                int start = firstValueIndex(tokens);
+                draft.put("item", token(tokens, start, draft.value("item")).toUpperCase(Locale.ROOT));
+                draft.put("amount", token(tokens, start + 1, draft.value("amount")));
+                draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
+            }
+            case "REPAIR_ITEM" -> {
+                int start = firstValueIndex(tokens);
+                draft.put("amount", token(tokens, start, draft.value("amount")));
+                draft.put("item", keyArg(tokens, "item", token(tokens, start + 1, draft.value("item"))).toUpperCase(Locale.ROOT));
+                draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
+            }
+            case "IMPULSE" -> {
+                int start = firstValueIndex(tokens);
+                draft.put("x", token(tokens, start, draft.value("x")));
+                draft.put("y", token(tokens, start + 1, draft.value("y")));
+                draft.put("z", token(tokens, start + 2, draft.value("z")));
+                draft.put("power", keyArg(tokens, "power", token(tokens, start + 3, draft.value("power"))));
+                draft.put("targets", keyArg(tokens, "targets", draft.value("targets")).toUpperCase(Locale.ROOT));
+                draft.put("radius", keyArg(tokens, "radius", draft.value("radius")));
+                draft.put("normalize", keyArg(tokens, "normalize", draft.value("normalize")));
+            }
+            case "EXPLODE" -> {
+                int start = firstValueIndex(tokens);
+                draft.put("power", token(tokens, start, draft.value("power")));
+                draft.put("x", token(tokens, start + 1, draft.value("x")));
+                draft.put("y", token(tokens, start + 2, draft.value("y")));
+                draft.put("z", token(tokens, start + 3, draft.value("z")));
+                draft.put("world", token(tokens, start + 4, draft.value("world")));
+                draft.put("fire", keyArg(tokens, "fire", draft.value("fire")));
+                draft.put("breakBlocks", keyArg(tokens, "break-blocks", draft.value("breakBlocks")));
+            }
             case "SEND_MESSAGE", "ACTIONBAR" -> {
                 draft.put("receiver", keyArg(tokens, "target", draft.value("receiver")).toUpperCase(Locale.ROOT));
                 draft.put("text", stripKeyToken(restAfter(line, 1), "target"));
@@ -811,6 +895,10 @@ public final class GuiManager implements Listener {
                 draft.put("offset", token(tokens, start + 2, draft.value("offset")));
                 draft.put("speed", token(tokens, start + 3, draft.value("speed")));
                 draft.put("at", keyArg(tokens, "at", draft.value("at")).toUpperCase(Locale.ROOT));
+                draft.put("shape", keyArg(tokens, "shape", draft.value("shape")).toUpperCase(Locale.ROOT));
+                draft.put("size", keyArg(tokens, "size", draft.value("size")));
+                draft.put("rotation", keyArg(tokens, "rotation", draft.value("rotation")));
+                draft.put("points", keyArg(tokens, "points", draft.value("points")));
             }
             case "PARTICLE_LINE" -> {
                 int start = firstValueIndex(tokens);
@@ -868,6 +956,7 @@ public final class GuiManager implements Listener {
     private void parseTeleport(ActionDraft draft, List<String> tokens) {
         String target = keyArg(tokens, "target", "CURRENT");
         draft.put("receiver", target.toUpperCase(Locale.ROOT));
+        draft.put("safe", keyArg(tokens, "safe", draft.value("safe")));
         String to = keyArg(tokens, "to", null);
         if (to != null) {
             draft.put("to", to.toUpperCase(Locale.ROOT));
@@ -898,6 +987,15 @@ public final class GuiManager implements Listener {
     private static String firstToken(String line) {
         List<String> tokens = tokens(line);
         return tokens.isEmpty() ? "" : tokens.getFirst();
+    }
+
+    private static String canonicalActionName(String name) {
+        String normalized = (name == null ? "" : name).toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "MOB_AROUND" -> "AROUND";
+            case "MOB_NEAREST" -> "NEAREST";
+            default -> normalized;
+        };
     }
 
     private static List<String> tokens(String line) {
@@ -938,6 +1036,27 @@ public final class GuiManager implements Listener {
             .filter(token -> !token.toLowerCase(Locale.ROOT).startsWith(prefix))
             .reduce((left, right) -> left + " " + right)
             .orElse("");
+    }
+
+    private static String selectorTarget(List<String> tokens, String action) {
+        String fallback = action != null && action.toUpperCase(Locale.ROOT).startsWith("MOB_") ? TargetKind.MOB.name() : TargetKind.PLAYER.name();
+        String raw = keyArg(tokens, "target", fallback);
+        return TargetKind.parse(raw).filter(target -> target != TargetKind.BLOCK).map(TargetKind::name).orElse(fallback);
+    }
+
+    private static int selectorBodyIndex(List<String> tokens) {
+        int index = 2;
+        while (index < tokens.size() && tokens.get(index).toLowerCase(Locale.ROOT).startsWith("target:")) {
+            index++;
+        }
+        return index;
+    }
+
+    private static String bodyAfter(List<String> tokens, int start) {
+        if (tokens.size() <= start) {
+            return "";
+        }
+        return String.join(" ", tokens.subList(start, tokens.size()));
     }
 
     private static String restAfter(String line, int tokenCount) {
@@ -1203,7 +1322,7 @@ public final class GuiManager implements Listener {
     }
 
     private ActionSpec actionSpec(String name) {
-        String normalized = firstToken(name).toUpperCase(Locale.ROOT);
+        String normalized = canonicalActionName(firstToken(name));
         return actionSpecs().stream().filter(spec -> spec.name().equals(normalized)).findFirst().orElse(null);
     }
 
@@ -1214,10 +1333,8 @@ public final class GuiManager implements Listener {
             spec("LOOP_START", Material.REPEATER, "Flow", true, true, p("times", "Times", Material.REPEATER, "Enter loop count", "3", ParamKind.INTEGER), p("delay", "Delay Ticks", Material.CLOCK, "Enter delay ticks between loops", "20", ParamKind.INTEGER)),
             spec("RANDOM_RUN", Material.DROPPER, "Flow", true, true, p("selectionCount", "Selection Count", Material.DROPPER, "Enter number of choices to run", "1", ParamKind.INTEGER)),
             spec("FOR", Material.HOPPER, "Flow", true, true, p("values", "Values", Material.HOPPER, "Enter comma-separated values", "one,two,three", ParamKind.TEXT), p("variable", "Variable", Material.NAME_TAG, "Enter variable name", "VALUE", ParamKind.VARIABLE)),
-            spec("AROUND", Material.PLAYER_HEAD, "Selectors", false, true, p("radius", "Radius", Material.PLAYER_HEAD, "Enter radius", "10", ParamKind.DOUBLE)),
-            spec("MOB_AROUND", Material.ZOMBIE_HEAD, "Selectors", false, true, p("radius", "Radius", Material.ZOMBIE_HEAD, "Enter radius", "10", ParamKind.DOUBLE)),
-            spec("NEAREST", Material.COMPASS, "Selectors", false, true, p("radius", "Radius", Material.COMPASS, "Enter radius", "10", ParamKind.DOUBLE)),
-            spec("MOB_NEAREST", Material.ROTTEN_FLESH, "Selectors", false, true, p("radius", "Radius", Material.ROTTEN_FLESH, "Enter radius", "10", ParamKind.DOUBLE)),
+            spec("AROUND", Material.PLAYER_HEAD, "Selectors", false, true, p("radius", "Radius", Material.PLAYER_HEAD, "Enter radius", "10", ParamKind.DOUBLE), p("target", "Target", Material.PLAYER_HEAD, "Toggle target type", "PLAYER", ParamKind.SELECTOR_TARGET)),
+            spec("NEAREST", Material.COMPASS, "Selectors", false, true, p("radius", "Radius", Material.COMPASS, "Enter radius", "10", ParamKind.DOUBLE), p("target", "Target", Material.PLAYER_HEAD, "Toggle target type", "PLAYER", ParamKind.SELECTOR_TARGET)),
             spec("HITSCAN", Material.SPYGLASS, "Selectors", false, true,
                 p("distance", "Distance", Material.SPYGLASS, "Enter distance", "32", ParamKind.INTEGER),
                 p("target", "Target", Material.PLAYER_HEAD, "Toggle target mode", "ENTITY", ParamKind.HITSCAN_TARGET),
@@ -1227,18 +1344,42 @@ public final class GuiManager implements Listener {
                 p("points", "Points", Material.REPEATER, "Enter trail points", "24", ParamKind.INTEGER),
                 p("offset", "Offset", Material.SUGAR, "Enter particle offset", "0", ParamKind.DOUBLE),
                 p("particleSpeed", "Particle Speed", Material.FEATHER, "Enter particle speed", "0", ParamKind.DOUBLE)),
-            spec("DAMAGE", Material.IRON_SWORD, "Entity", false, false, p("amount", "Amount", Material.RED_DYE, "Enter damage amount", "5", ParamKind.DOUBLE), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
+            spec("HITBOX", Material.MAGMA_CREAM, "Selectors", true, true,
+                p("shape", "Shape", Material.MAGMA_CREAM, "Enter SPHERE, CUBE, or CONE", "SPHERE", ParamKind.TEXT),
+                p("size", "Size", Material.SLIME_BALL, "Enter size", "3", ParamKind.DOUBLE),
+                p("at", "At", Material.COMPASS, "Toggle location", "CURRENT", ParamKind.AT_MODE),
+                p("targets", "Targets", Material.PLAYER_HEAD, "Enter PLAYER,MOB,ENTITY,BLOCK", "ENTITY", ParamKind.TEXT),
+                p("maxPlayers", "Max Players", Material.PLAYER_HEAD, "Enter max player hits", "50", ParamKind.INTEGER),
+                p("maxEntities", "Max Entities", Material.ZOMBIE_HEAD, "Enter max entity hits", "50", ParamKind.INTEGER),
+                p("maxBlocks", "Max Blocks", Material.STONE, "Enter max block hits", "64", ParamKind.INTEGER),
+                p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle, or clear", "", ParamKind.TEXT),
+                p("edgeParticles", "Edge Particles", Material.FIREWORK_STAR, "Toggle edge particles", "false", ParamKind.BOOLEAN),
+                p("points", "Points", Material.REPEATER, "Enter particle points", "24", ParamKind.INTEGER)),
+            spec("TIMER", Material.CLOCK, "Flow", true, true,
+                p("duration", "Duration", Material.CLOCK, "Enter duration ticks", "20", ParamKind.INTEGER),
+                p("interval", "Interval", Material.REPEATER, "Enter interval ticks", "1", ParamKind.INTEGER)),
+            spec("LAUNCH_PROJECTILE", Material.ARROW, "Entity", false, false,
+                p("projectile", "Projectile", Material.ARROW, "Enter projectile type", "ARROW", ParamKind.TEXT),
+                p("speed", "Speed", Material.SPECTRAL_ARROW, "Enter speed", "1.5", ParamKind.DOUBLE),
+                p("gravity", "Gravity", Material.FEATHER, "Toggle gravity", "true", ParamKind.BOOLEAN),
+                p("track", "Track Hits", Material.COMPASS, "Toggle hit tracking", "true", ParamKind.BOOLEAN)),
+            spec("DAMAGE", Material.IRON_SWORD, "Entity", false, false, p("amount", "Amount", Material.RED_DYE, "Enter damage amount", "5", ParamKind.DOUBLE), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE), p("damageType", "Type", Material.NETHER_STAR, "Enter normal or true", "NORMAL", ParamKind.TEXT)),
             spec("HEAL", Material.GOLDEN_APPLE, "Entity", false, false, p("amount", "Amount", Material.GOLDEN_APPLE, "Enter heal amount, or leave blank for full heal", "5", ParamKind.DOUBLE), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
             spec("SET_HEALTH", Material.RED_DYE, "Entity", false, false, p("amount", "Amount", Material.RED_DYE, "Enter health amount", "10", ParamKind.DOUBLE), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
             spec("KILL", Material.WITHER_SKELETON_SKULL, "Entity", false, false, p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
             spec("BURN", Material.FLINT_AND_STEEL, "Entity", false, false, p("seconds", "Seconds", Material.FLINT_AND_STEEL, "Enter burn seconds", "5", ParamKind.INTEGER), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
             spec("INVULNERABILITY", Material.SHIELD, "Entity", false, false, p("ticks", "Ticks", Material.SHIELD, "Enter invulnerability ticks", "40", ParamKind.INTEGER), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
-            spec("TELEPORT", Material.ENDER_PEARL, "Entity", false, false, p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE), p("to", "To", Material.COMPASS, "Toggle destination", "COORDS", ParamKind.TELEPORT_TO), p("x", "X", Material.MAP, "Enter X", "{SELF_X}", ParamKind.TEXT), p("y", "Y", Material.MAP, "Enter Y", "{SELF_Y}", ParamKind.TEXT), p("z", "Z", Material.MAP, "Enter Z", "{SELF_Z}", ParamKind.TEXT), p("world", "World", Material.GRASS_BLOCK, "Enter world, or clear", "", ParamKind.TEXT)),
+            spec("TELEPORT", Material.ENDER_PEARL, "Entity", false, false, p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE), p("to", "To", Material.COMPASS, "Toggle destination", "COORDS", ParamKind.TELEPORT_TO), p("x", "X", Material.MAP, "Enter X", "{SELF_X}", ParamKind.TEXT), p("y", "Y", Material.MAP, "Enter Y", "{SELF_Y}", ParamKind.TEXT), p("z", "Z", Material.MAP, "Enter Z", "{SELF_Z}", ParamKind.TEXT), p("world", "World", Material.GRASS_BLOCK, "Enter world, or clear", "", ParamKind.TEXT), p("safe", "Safe", Material.SHIELD, "Toggle safe teleport", "false", ParamKind.BOOLEAN)),
             spec("VELOCITY", Material.SLIME_BALL, "Entity", false, false, p("x", "X", Material.SLIME_BALL, "Enter X velocity", "0", ParamKind.DOUBLE), p("y", "Y", Material.SLIME_BALL, "Enter Y velocity", "1", ParamKind.DOUBLE), p("z", "Z", Material.SLIME_BALL, "Enter Z velocity", "0", ParamKind.DOUBLE), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE)),
             spec("DASH", Material.FEATHER, "Entity", false, false, p("strength", "Strength", Material.FEATHER, "Enter dash strength", "1.5", ParamKind.DOUBLE)),
+            spec("DAMAGE_ITEM", Material.ANVIL, "Item", false, false, p("amount", "Amount", Material.ANVIL, "Enter damage amount", "1", ParamKind.INTEGER), p("item", "Item", Material.IRON_SWORD, "Enter SELF or material", "SELF", ParamKind.TEXT), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "SELF", ParamKind.TARGET_MODE)),
+            spec("TAKE_ITEM", Material.HOPPER, "Item", false, false, p("item", "Item", Material.HOPPER, "Enter SELF or material", "SELF", ParamKind.TEXT), p("amount", "Amount", Material.CHEST, "Enter amount", "1", ParamKind.INTEGER), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "SELF", ParamKind.TARGET_MODE)),
+            spec("REPAIR_ITEM", Material.GRINDSTONE, "Item", false, false, p("amount", "Amount", Material.GRINDSTONE, "Enter amount or full", "full", ParamKind.TEXT), p("item", "Item", Material.IRON_SWORD, "Enter SELF or material", "SELF", ParamKind.TEXT), p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "SELF", ParamKind.TARGET_MODE)),
+            spec("IMPULSE", Material.WIND_CHARGE, "Entity", false, false, p("x", "X", Material.MAP, "Enter origin X", "{SELF_X}", ParamKind.TEXT), p("y", "Y", Material.MAP, "Enter origin Y", "{SELF_Y}", ParamKind.TEXT), p("z", "Z", Material.MAP, "Enter origin Z", "{SELF_Z}", ParamKind.TEXT), p("power", "Power", Material.FEATHER, "Enter power", "1", ParamKind.DOUBLE), p("targets", "Targets", Material.PLAYER_HEAD, "Enter targets", "CURRENT", ParamKind.TEXT), p("radius", "Radius", Material.COMPASS, "Enter radius", "8", ParamKind.DOUBLE), p("normalize", "Normalize", Material.SUGAR, "Toggle normalize", "true", ParamKind.BOOLEAN)),
+            spec("EXPLODE", Material.TNT, "Entity", false, false, p("power", "Power", Material.TNT, "Enter explosion power", "2", ParamKind.DOUBLE), p("x", "X", Material.MAP, "Enter X", "{SELF_X}", ParamKind.TEXT), p("y", "Y", Material.MAP, "Enter Y", "{SELF_Y}", ParamKind.TEXT), p("z", "Z", Material.MAP, "Enter Z", "{SELF_Z}", ParamKind.TEXT), p("world", "World", Material.GRASS_BLOCK, "Enter world, or clear", "", ParamKind.TEXT), p("fire", "Fire", Material.FLINT_AND_STEEL, "Toggle fire", "false", ParamKind.BOOLEAN), p("breakBlocks", "Break Blocks", Material.STONE, "Toggle block breaking", "true", ParamKind.BOOLEAN)),
             spec("SEND_MESSAGE", Material.PAPER, "Message", false, false, p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE), p("text", "Text", Material.PAPER, "Enter message text", "&aHello", ParamKind.TEXT)),
             spec("ACTIONBAR", Material.OAK_SIGN, "Message", false, false, p("receiver", "Target", Material.PLAYER_HEAD, "Toggle receiver", "CURRENT", ParamKind.TARGET_MODE), p("text", "Text", Material.OAK_SIGN, "Enter actionbar text", "&eReady", ParamKind.TEXT)),
-            spec("PARTICLE", Material.BLAZE_POWDER, "Visual", false, false, p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle type", "FLAME", ParamKind.TEXT), p("count", "Count", Material.GUNPOWDER, "Enter count", "20", ParamKind.INTEGER), p("offset", "Offset", Material.SUGAR, "Enter offset", "0.2", ParamKind.DOUBLE), p("speed", "Speed", Material.FEATHER, "Enter speed", "0.01", ParamKind.DOUBLE), p("at", "At", Material.COMPASS, "Toggle location", "CURRENT", ParamKind.AT_MODE)),
+            spec("PARTICLE", Material.BLAZE_POWDER, "Visual", false, false, p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle type", "FLAME", ParamKind.TEXT), p("count", "Count", Material.GUNPOWDER, "Enter count", "20", ParamKind.INTEGER), p("offset", "Offset", Material.SUGAR, "Enter offset", "0.2", ParamKind.DOUBLE), p("speed", "Speed", Material.FEATHER, "Enter speed", "0.01", ParamKind.DOUBLE), p("at", "At", Material.COMPASS, "Toggle location", "CURRENT", ParamKind.AT_MODE), p("shape", "Shape", Material.FIREWORK_STAR, "Enter shape", "POINT", ParamKind.TEXT), p("size", "Size", Material.SLIME_BALL, "Enter shape size", "1", ParamKind.DOUBLE), p("rotation", "Rotation", Material.COMPASS, "Enter x,y,z", "0,0,0", ParamKind.TEXT), p("points", "Points", Material.REPEATER, "Enter shape points", "24", ParamKind.INTEGER)),
             spec("PARTICLE_LINE", Material.BLAZE_ROD, "Visual", false, false, p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle type", "FLAME", ParamKind.TEXT), p("distance", "Distance", Material.SPYGLASS, "Enter distance", "8", ParamKind.DOUBLE), p("points", "Points", Material.REPEATER, "Enter points", "24", ParamKind.INTEGER), p("offset", "Offset", Material.SUGAR, "Enter offset", "0", ParamKind.DOUBLE), p("speed", "Speed", Material.FEATHER, "Enter speed", "0", ParamKind.DOUBLE), p("at", "At", Material.COMPASS, "Toggle location", "CURRENT", ParamKind.AT_MODE)),
             spec("PROJECTILE_TRAIL", Material.FIREWORK_ROCKET, "Visual", true, true,
                 p("particle", "Particle", Material.BLAZE_POWDER, "Enter particle, or clear", "FLAME", ParamKind.TEXT),
@@ -1532,6 +1673,9 @@ public final class GuiManager implements Listener {
         if (context.hit()) {
             allowed.addAll(List.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z"));
         }
+        if (context.ticks()) {
+            allowed.add("TICKS");
+        }
         return allowed.stream()
             .sorted()
             .map(name -> "{" + name + "}")
@@ -1542,7 +1686,7 @@ public final class GuiManager implements Listener {
     private GuiContext bodyContext(TriggerType type, ActionDraft parent) {
         GuiContext base = GuiContext.from(type);
         String name = parent.spec.name();
-        if (Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST").contains(name)) {
+        if (Set.of("AROUND", "NEAREST").contains(name)) {
             return base.withTarget();
         }
         if (name.equals("HITSCAN")) {
@@ -1552,6 +1696,12 @@ public final class GuiManager implements Listener {
         }
         if (name.equals("PROJECTILE_TRAIL")) {
             return base.withProjectile();
+        }
+        if (name.equals("HITBOX")) {
+            return base.withTarget().withBlock().withHit();
+        }
+        if (name.equals("TIMER")) {
+            return base.withTicks();
         }
         return base;
     }
@@ -1720,6 +1870,7 @@ public final class GuiManager implements Listener {
         TELEPORT_TO,
         AT_MODE,
         HITSCAN_TARGET,
+        SELECTOR_TARGET,
         VEINMINE_MODE,
         VEINMINE_MATCH
     }
@@ -1730,30 +1881,35 @@ public final class GuiManager implements Listener {
     private record ActionSpec(String name, Material icon, String group, List<ActionParam> params, boolean block, boolean hasBody) {
     }
 
-    private record GuiContext(boolean target, boolean block, boolean projectile, boolean hit) {
+    private record GuiContext(boolean target, boolean block, boolean projectile, boolean hit, boolean ticks) {
         static GuiContext from(TriggerType type) {
             return new GuiContext(
                 TriggerType.TARGET_TRIGGERS.contains(type),
                 TriggerType.BLOCK_TRIGGERS.contains(type),
                 TriggerType.PROJECTILE_TRIGGERS.contains(type),
+                false,
                 false
             );
         }
 
         GuiContext withTarget() {
-            return new GuiContext(true, block, projectile, hit);
+            return new GuiContext(true, block, projectile, hit, ticks);
         }
 
         GuiContext withBlock() {
-            return new GuiContext(target, true, projectile, hit);
+            return new GuiContext(target, true, projectile, hit, ticks);
         }
 
         GuiContext withProjectile() {
-            return new GuiContext(target, block, true, hit);
+            return new GuiContext(target, block, true, hit, ticks);
         }
 
         GuiContext withHit() {
-            return new GuiContext(target, block, projectile, true);
+            return new GuiContext(target, block, projectile, true, ticks);
+        }
+
+        GuiContext withTicks() {
+            return new GuiContext(target, block, projectile, hit, true);
         }
     }
 
@@ -1801,9 +1957,13 @@ public final class GuiManager implements Listener {
                 case "LOOP_START" -> block("LOOP_START " + value("times") + " " + value("delay"), "LOOP_END");
                 case "RANDOM_RUN" -> block("RANDOM_RUN selectionCount:" + value("selectionCount"), "RANDOM_END");
                 case "FOR" -> block("FOR [" + value("values") + "] > " + value("variable").toUpperCase(Locale.ROOT), "END_FOR " + value("variable").toUpperCase(Locale.ROOT));
-                case "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST" -> List.of(join(name, value("radius"), chainBody()));
+                case "AROUND", "NEAREST" -> List.of(join(name, value("radius"), "target:" + value("target").toUpperCase(Locale.ROOT), chainBody()));
                 case "HITSCAN" -> List.of(formatHitscan());
-                case "DAMAGE", "SET_HEALTH" -> List.of(join(name, value("amount"), receiver()));
+                case "HITBOX" -> block(formatHitbox(), "END_HITBOX");
+                case "TIMER" -> block(formatTimer(), "END_TIMER");
+                case "LAUNCH_PROJECTILE" -> List.of(formatLaunchProjectile());
+                case "DAMAGE" -> List.of(join(name, value("amount"), "type:" + value("damageType").toLowerCase(Locale.ROOT), receiver()));
+                case "SET_HEALTH" -> List.of(join(name, value("amount"), receiver()));
                 case "HEAL" -> value("amount").isBlank() ? List.of(join(name, receiver())) : List.of(join(name, value("amount"), receiver()));
                 case "KILL" -> List.of(join(name, receiver()));
                 case "BURN" -> List.of(join(name, value("seconds"), receiver()));
@@ -1811,8 +1971,13 @@ public final class GuiManager implements Listener {
                 case "TELEPORT" -> formatTeleport();
                 case "VELOCITY" -> List.of(join(name, value("x"), value("y"), value("z"), receiver()));
                 case "DASH" -> List.of(join(name, value("strength")));
+                case "DAMAGE_ITEM" -> List.of(join(name, value("amount"), "item:" + value("item").toUpperCase(Locale.ROOT), receiver()));
+                case "TAKE_ITEM" -> List.of(join(name, value("item").toUpperCase(Locale.ROOT), value("amount"), receiver()));
+                case "REPAIR_ITEM" -> List.of(join(name, value("amount"), "item:" + value("item").toUpperCase(Locale.ROOT), receiver()));
+                case "IMPULSE" -> List.of(join(name, value("x"), value("y"), value("z"), "power:" + value("power"), "targets:" + value("targets").toUpperCase(Locale.ROOT), "radius:" + value("radius"), "normalize:" + value("normalize").toLowerCase(Locale.ROOT)));
+                case "EXPLODE" -> List.of(formatExplode());
                 case "SEND_MESSAGE", "ACTIONBAR" -> List.of(join(name, receiver(), value("text")));
-                case "PARTICLE" -> List.of(join(name, value("particle").toUpperCase(Locale.ROOT), value("count"), value("offset"), value("speed"), at()));
+                case "PARTICLE" -> List.of(formatParticle());
                 case "PARTICLE_LINE" -> List.of(join(name, value("particle").toUpperCase(Locale.ROOT), value("distance"), value("points"), value("offset"), value("speed"), at()));
                 case "PROJECTILE_TRAIL" -> block(formatProjectileTrail(), "END_PROJECTILE_TRAIL");
                 case "SET_BLOCK" -> List.of(join(name, value("material").toUpperCase(Locale.ROOT)));
@@ -1828,12 +1993,12 @@ public final class GuiManager implements Listener {
             String receiver = value("receiver").toUpperCase(Locale.ROOT);
             String to = value("to").toUpperCase(Locale.ROOT);
             if (!to.equals("COORDS")) {
-                return List.of("TELEPORT target:" + receiver + " to:" + to);
+                return List.of("TELEPORT target:" + receiver + " to:" + to + " safe:" + value("safe").toLowerCase(Locale.ROOT));
             }
             String world = value("world");
             return world.isBlank()
-                ? List.of(join("TELEPORT", "target:" + receiver, value("x"), value("y"), value("z")))
-                : List.of(join("TELEPORT", "target:" + receiver, value("x"), value("y"), value("z"), world));
+                ? List.of(join("TELEPORT", "target:" + receiver, value("x"), value("y"), value("z"), "safe:" + value("safe").toLowerCase(Locale.ROOT)))
+                : List.of(join("TELEPORT", "target:" + receiver, value("x"), value("y"), value("z"), world, "safe:" + value("safe").toLowerCase(Locale.ROOT)));
         }
 
         private String formatHitscan() {
@@ -1859,6 +2024,62 @@ public final class GuiManager implements Listener {
 
         private String at() {
             return "at:" + value("at").toUpperCase(Locale.ROOT);
+        }
+
+        private String formatHitbox() {
+            List<String> parts = new ArrayList<>();
+            parts.add("HITBOX");
+            parts.add("shape:" + value("shape").toUpperCase(Locale.ROOT));
+            parts.add("size:" + value("size"));
+            parts.add("at:" + value("at").toUpperCase(Locale.ROOT));
+            parts.add("targets:" + value("targets").toUpperCase(Locale.ROOT));
+            parts.add("max-players:" + value("maxPlayers"));
+            parts.add("max-entities:" + value("maxEntities"));
+            parts.add("max-blocks:" + value("maxBlocks"));
+            if (!value("particle").isBlank()) {
+                parts.add("particle:" + value("particle").toUpperCase(Locale.ROOT));
+            }
+            parts.add("edge-particles:" + value("edgeParticles").toLowerCase(Locale.ROOT));
+            parts.add("points:" + value("points"));
+            return join(parts.toArray(String[]::new));
+        }
+
+        private String formatTimer() {
+            return join("TIMER", "duration:" + value("duration"), "interval:" + value("interval"));
+        }
+
+        private String formatLaunchProjectile() {
+            return join("LAUNCH_PROJECTILE", value("projectile").toUpperCase(Locale.ROOT), "speed:" + value("speed"), "gravity:" + value("gravity").toLowerCase(Locale.ROOT), "track:" + value("track").toLowerCase(Locale.ROOT));
+        }
+
+        private String formatParticle() {
+            List<String> parts = new ArrayList<>();
+            parts.add("PARTICLE");
+            parts.add(value("particle").toUpperCase(Locale.ROOT));
+            parts.add(value("count"));
+            parts.add(value("offset"));
+            parts.add(value("speed"));
+            parts.add(at());
+            parts.add("shape:" + value("shape").toUpperCase(Locale.ROOT));
+            parts.add("size:" + value("size"));
+            parts.add("rotation:" + value("rotation"));
+            parts.add("points:" + value("points"));
+            return join(parts.toArray(String[]::new));
+        }
+
+        private String formatExplode() {
+            List<String> parts = new ArrayList<>();
+            parts.add("EXPLODE");
+            parts.add(value("power"));
+            parts.add(value("x"));
+            parts.add(value("y"));
+            parts.add(value("z"));
+            if (!value("world").isBlank()) {
+                parts.add(value("world"));
+            }
+            parts.add("fire:" + value("fire").toLowerCase(Locale.ROOT));
+            parts.add("break-blocks:" + value("breakBlocks").toLowerCase(Locale.ROOT));
+            return join(parts.toArray(String[]::new));
         }
 
         private String formatVeinmine() {
@@ -1911,11 +2132,13 @@ public final class GuiManager implements Listener {
         private static String defaultBody(String actionName) {
             return switch (actionName) {
                 case "IF", "AROUND", "NEAREST" -> "SEND_MESSAGE &aReady";
-                case "MOB_AROUND", "MOB_NEAREST", "HITSCAN" -> "DAMAGE 5";
+                case "HITSCAN" -> "DAMAGE 5";
                 case "LOOP_START" -> "PARTICLE CRIT 15 0.2 0.01";
                 case "RANDOM_RUN" -> "SEND_MESSAGE &aOption";
                 case "FOR" -> "SEND_MESSAGE &e{VALUE}";
                 case "PROJECTILE_TRAIL" -> "PARTICLE CRIT 2 0.05 0";
+                case "HITBOX" -> "DAMAGE 5";
+                case "TIMER" -> "PARTICLE CRIT 1";
                 default -> "";
             };
         }

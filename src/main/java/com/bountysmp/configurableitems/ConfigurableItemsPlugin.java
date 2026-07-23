@@ -10,6 +10,7 @@ import com.bountysmp.configurableitems.restriction.RestrictionListener;
 import com.bountysmp.configurableitems.storage.ItemRepository;
 import com.bountysmp.configurableitems.trigger.TriggerExecutor;
 import com.bountysmp.configurableitems.trigger.TriggerListener;
+import com.bountysmp.configurableitems.trigger.ProjectileTracker;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -26,14 +27,15 @@ public final class ConfigurableItemsPlugin extends JavaPlugin {
         repository.load();
         itemFactory = new ItemFactory(this);
         InputManager inputManager = new InputManager(this);
-        ActionEngine actionEngine = new ActionEngine(this, repository, ActionConfig.from(getConfig()));
+        ProjectileTracker projectileTracker = new ProjectileTracker();
+        ActionEngine actionEngine = new ActionEngine(this, repository, ActionConfig.from(getConfig()), projectileTracker);
         TriggerExecutor triggerExecutor = new TriggerExecutor(this, repository, actionEngine);
         guiManager = new GuiManager(this, repository, itemFactory, inputManager);
 
         Bukkit.getPluginManager().registerEvents(inputManager, this);
         Bukkit.getPluginManager().registerEvents(guiManager, this);
         Bukkit.getPluginManager().registerEvents(new RestrictionListener(itemFactory, repository), this);
-        Bukkit.getPluginManager().registerEvents(new TriggerListener(this, itemFactory, repository, triggerExecutor), this);
+        Bukkit.getPluginManager().registerEvents(new TriggerListener(this, itemFactory, repository, triggerExecutor, projectileTracker), this);
 
         ConfigurableItemsCommand command = new ConfigurableItemsCommand(repository, itemFactory, guiManager);
         PluginCommand pluginCommand = getCommand("configurableitems");

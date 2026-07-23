@@ -38,13 +38,24 @@ final class TriggerExecutorTest {
     }
 
     @Test
-    void allowsUppercaseNumericForVariablesOnlyInsideDeclaredScope() {
+    void allowsNumericForVariablesOnlyInsideDeclaredScope() {
+        List<CustomItemDefinition.TriggerCommandDef> commands = List.of(
+            new CustomItemDefinition.TriggerCommandDef("FOR [STEP=0.5;1;3]"),
+            new CustomItemDefinition.TriggerCommandDef("SEND_MESSAGE {STEP}"),
+            new CustomItemDefinition.TriggerCommandDef("END_FOR STEP")
+        );
+
+        assertTrue(TriggerExecutor.invalidVariable(commands, TriggerType.RIGHT_CLICK).isEmpty());
+    }
+
+    @Test
+    void rejectsReservedForVariables() {
         List<CustomItemDefinition.TriggerCommandDef> commands = List.of(
             new CustomItemDefinition.TriggerCommandDef("FOR [X=0.5;1;3]"),
             new CustomItemDefinition.TriggerCommandDef("SEND_MESSAGE {X}"),
             new CustomItemDefinition.TriggerCommandDef("END_FOR X")
         );
 
-        assertTrue(TriggerExecutor.invalidVariable(commands, TriggerType.RIGHT_CLICK).isEmpty());
+        assertEquals("X", TriggerExecutor.invalidVariable(commands, TriggerType.RIGHT_CLICK).orElseThrow());
     }
 }

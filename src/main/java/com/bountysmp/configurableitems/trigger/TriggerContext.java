@@ -97,6 +97,16 @@ public final class TriggerContext {
         return this;
     }
 
+    public TriggerContext critical(boolean critical) {
+        put("CRITICAL", String.valueOf(critical));
+        return this;
+    }
+
+    public TriggerContext variable(String key, String value) {
+        put(key, value);
+        return this;
+    }
+
     private void putLocation(String prefix, Location location) {
         put(prefix + "X", String.valueOf(location.getBlockX()));
         put(prefix + "Y", String.valueOf(location.getBlockY()));

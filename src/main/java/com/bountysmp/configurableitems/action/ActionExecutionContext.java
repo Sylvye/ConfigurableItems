@@ -12,6 +12,7 @@ import org.bukkit.entity.Player;
 final class ActionExecutionContext {
     private final TriggerContext triggerContext;
     private Entity target;
+    private Entity projectile;
     private Location location;
     private Block block;
     private final Map<String, String> variables = new HashMap<>();
@@ -19,6 +20,7 @@ final class ActionExecutionContext {
     ActionExecutionContext(TriggerContext triggerContext) {
         this.triggerContext = triggerContext;
         this.target = triggerContext.target() == null ? triggerContext.self() : triggerContext.target();
+        this.projectile = triggerContext.projectile();
         this.block = triggerContext.block();
         this.location = block == null ? target.getLocation() : block.getLocation();
         this.variables.putAll(triggerContext.variables());
@@ -27,6 +29,7 @@ final class ActionExecutionContext {
     ActionExecutionContext copy() {
         ActionExecutionContext copy = new ActionExecutionContext(triggerContext);
         copy.target = target;
+        copy.projectile = projectile;
         copy.location = location == null ? null : location.clone();
         copy.block = block;
         copy.variables.clear();
@@ -44,6 +47,10 @@ final class ActionExecutionContext {
 
     Entity target() {
         return target;
+    }
+
+    Entity projectile() {
+        return projectile;
     }
 
     Location location() {
@@ -70,6 +77,15 @@ final class ActionExecutionContext {
 
     void clearTarget() {
         this.target = null;
+    }
+
+    void projectile(Entity projectile) {
+        this.projectile = projectile;
+        if (projectile != null) {
+            variables.put("PROJECTILE", projectile.getType().key().asString());
+            variables.put("PROJECTILE_WORLD", projectile.getWorld().getName());
+            putLocationVariables("PROJECTILE_", projectile.getLocation());
+        }
     }
 
     void location(Location location) {

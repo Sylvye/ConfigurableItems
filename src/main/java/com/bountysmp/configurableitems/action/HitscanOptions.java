@@ -3,11 +3,12 @@ package com.bountysmp.configurableitems.action;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import org.bukkit.Particle;
 
 public record HitscanOptions(
     int distance,
-    TargetMode targetMode,
+    TargetKind targetMode,
     Integer maxHits,
     String particle,
     int points,
@@ -19,13 +20,6 @@ public record HitscanOptions(
 ) {
     private static final int DEFAULT_DISTANCE = 32;
     private static final int DEFAULT_POINTS = 24;
-
-    public enum TargetMode {
-        PLAYER,
-        MOB,
-        ENTITY,
-        BLOCK
-    }
 
     public boolean allHits() {
         return maxHits == null;
@@ -52,7 +46,7 @@ public record HitscanOptions(
             errors.add("HITSCAN requires distance and action body");
         }
 
-        TargetMode targetMode = TargetMode.ENTITY;
+        TargetKind targetMode = TargetKind.ENTITY;
         Integer maxHits = 1;
         String particle = "";
         int points = DEFAULT_POINTS;
@@ -67,10 +61,11 @@ public record HitscanOptions(
             String value = token.substring(token.indexOf(':') + 1);
             switch (key) {
                 case "target" -> {
-                    try {
-                        targetMode = TargetMode.valueOf(value.toUpperCase(Locale.ROOT));
-                    } catch (IllegalArgumentException ex) {
-                        errors.add("HITSCAN target must be PLAYER, MOB, ENTITY, or BLOCK: " + value);
+                    Optional<TargetKind> parsed = TargetKind.parse(value);
+                    if (parsed.isEmpty()) {
+                        errors.add("HITSCAN target must be " + TargetKind.allowedValues(true) + ": " + value);
+                    } else {
+                        targetMode = parsed.get();
                     }
                 }
                 case "max-hits" -> {

@@ -15,14 +15,16 @@ public final class ActionFormatter {
 
     public static final Set<String> ACTION_NAMES = Set.of(
         "DELAY_TICK", "IF", "LOOP_START", "LOOP_END", "RANDOM_RUN", "RANDOM_END", "FOR", "END_FOR",
-        "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN",
+        "AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST", "HITSCAN", "HITBOX", "END_HITBOX", "TIMER", "END_TIMER",
+        "LAUNCH_PROJECTILE",
         "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DASH",
+        "DAMAGE_ITEM", "TAKE_ITEM", "REPAIR_ITEM", "IMPULSE", "EXPLODE",
         "SEND_MESSAGE", "ACTIONBAR", "PARTICLE", "PARTICLE_LINE", "PROJECTILE_TRAIL", "END_PROJECTILE_TRAIL",
         "SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "DROPITEM", "VEINMINE"
     );
 
     public static final Set<String> ENTITY_ACTION_NAMES = Set.of(
-        "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY"
+        "DAMAGE", "HEAL", "SET_HEALTH", "KILL", "BURN", "INVULNERABILITY", "TELEPORT", "VELOCITY", "DAMAGE_ITEM", "TAKE_ITEM", "REPAIR_ITEM"
     );
 
     private ActionFormatter() {
@@ -79,18 +81,29 @@ public final class ActionFormatter {
         if (first.equals("HITSCAN")) {
             return normalizeHitscan(first, rest);
         }
+        if (first.equals("HITBOX")) {
+            return normalizeHitbox(first, rest);
+        }
+        if (first.equals("TIMER")) {
+            return normalizeTimer(first, rest);
+        }
         if (first.equals("VEINMINE")) {
             return normalizeVeinmine(first, rest);
         }
         if (first.equals("PROJECTILE_TRAIL")) {
             return normalizeProjectileTrail(first, rest);
         }
-        if (Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST").contains(first)) {
-            String[] selectorParts = rest.split("\\s+", 2);
-            if (selectorParts.length < 2) {
-                return rest.isBlank() ? first : first + " " + rest;
-            }
-            return first + " " + selectorParts[0] + " " + normalizeInline(selectorParts[1]);
+        if (first.equals("PARTICLE") && !line.contains("<+>")) {
+            return normalizeParticle(first, rest);
+        }
+        if (first.equals("DAMAGE") && !line.contains("<+>")) {
+            return normalizeKeyValues(first, rest, Set.of("type", "target"), Set.of("type"));
+        }
+        if (!line.contains("<+>") && (first.equals("TELEPORT") || first.equals("LAUNCH_PROJECTILE") || first.equals("IMPULSE") || first.equals("EXPLODE"))) {
+            return normalizeKeyValues(first, rest, Set.of("target", "to", "safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks", "power", "radius", "speed"), Set.of("safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks"));
+        }
+        if (isSelector(first)) {
+            return normalizeSelector(first, rest);
         }
         if (line.contains("<+>")) {
             return joinNormalized(line, "\\s*<\\+>\\s*", " <+> ");
@@ -151,6 +164,130 @@ public final class ActionFormatter {
         }
         String body = index < tokens.length ? String.join(" ", List.of(tokens).subList(index, tokens.length)) : "";
         return body.isBlank() ? header.toString() : header + " " + normalizeInline(body);
+    }
+
+    private static String normalizeSelector(String first, String rest) {
+        String action = first.equals("MOB_AROUND") ? "AROUND" : first.equals("MOB_NEAREST") ? "NEAREST" : first;
+        String target = first.startsWith("MOB_") ? TargetKind.MOB.name() : TargetKind.PLAYER.name();
+        if (rest.isBlank()) {
+            return action;
+        }
+        String[] tokens = rest.split("\\s+");
+        String radius = tokens[0];
+        int index = 1;
+        while (index < tokens.length && isSelectorOption(tokens[index])) {
+            String value = tokens[index].substring(tokens[index].indexOf(':') + 1);
+            target = TargetKind.parse(value)
+                .map(TargetKind::name)
+                .orElse(value.toUpperCase(Locale.ROOT));
+            index++;
+        }
+        String header = action + " " + radius + " target:" + target;
+        String body = index < tokens.length ? String.join(" ", List.of(tokens).subList(index, tokens.length)) : "";
+        return body.isBlank() ? header : header + " " + normalizeInline(body);
+    }
+
+    private static String normalizeHitbox(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        List<String> output = new java.util.ArrayList<>();
+        output.add(first);
+        for (String token : tokens) {
+            if (!HitboxOptions.isHitboxOption(token)) {
+                output.add(token);
+                continue;
+            }
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            switch (key) {
+                case "shape", "at", "particle" -> value = value.toUpperCase(Locale.ROOT);
+                case "targets" -> value = value.toUpperCase(Locale.ROOT);
+                case "edge-particles" -> value = value.toLowerCase(Locale.ROOT);
+                default -> {}
+            }
+            output.add(key + ":" + value);
+        }
+        return String.join(" ", output);
+    }
+
+    private static String normalizeTimer(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        List<String> output = new java.util.ArrayList<>();
+        output.add(first);
+        for (String token : tokens) {
+            if (!TimerOptions.isTimerOption(token)) {
+                output.add(token);
+                continue;
+            }
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            output.add(key + ":" + value);
+        }
+        return String.join(" ", output);
+    }
+
+    private static String normalizeParticle(String first, String rest) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        List<String> output = new java.util.ArrayList<>();
+        output.add(first);
+        for (String token : tokens) {
+            if (!ParticleShapeOptions.isParticleShapeOption(token)) {
+                output.add(token);
+                continue;
+            }
+            String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
+            String value = token.substring(token.indexOf(':') + 1);
+            if (key.equals("shape")) {
+                value = value.toUpperCase(Locale.ROOT);
+            }
+            output.add(key + ":" + value);
+        }
+        return String.join(" ", output);
+    }
+
+    private static String normalizeKeyValues(String first, String rest, Set<String> supportedKeys, Set<String> lowerValueKeys) {
+        if (rest.isBlank()) {
+            return first;
+        }
+        String[] tokens = rest.split("\\s+");
+        List<String> output = new java.util.ArrayList<>();
+        output.add(first);
+        for (String token : tokens) {
+            int colon = token.indexOf(':');
+            if (colon < 1) {
+                output.add(token);
+                continue;
+            }
+            String key = token.substring(0, colon).toLowerCase(Locale.ROOT);
+            String value = token.substring(colon + 1);
+            if (!supportedKeys.contains(key)) {
+                output.add(token);
+                continue;
+            }
+            if (lowerValueKeys.contains(key)) {
+                value = value.toLowerCase(Locale.ROOT);
+            } else if (key.equals("target") || key.equals("to") || key.equals("targets")) {
+                value = value.toUpperCase(Locale.ROOT);
+            }
+            output.add(key + ":" + value);
+        }
+        return String.join(" ", output);
+    }
+
+    private static boolean isSelector(String action) {
+        return Set.of("AROUND", "MOB_AROUND", "NEAREST", "MOB_NEAREST").contains(action);
+    }
+
+    private static boolean isSelectorOption(String token) {
+        return token != null && token.toLowerCase(Locale.ROOT).startsWith("target:");
     }
 
     private static boolean legacyParticleSpeed(String value) {

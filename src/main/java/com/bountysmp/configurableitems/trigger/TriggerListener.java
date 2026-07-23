@@ -4,8 +4,6 @@ import com.bountysmp.configurableitems.item.ItemFactory;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
 import com.bountysmp.configurableitems.storage.ItemRepository;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.entity.Entity;
@@ -41,14 +39,15 @@ public final class TriggerListener implements Listener {
     private final ItemFactory itemFactory;
     private final ItemRepository repository;
     private final TriggerExecutor executor;
-    private final Map<UUID, String> projectileItems = new HashMap<>();
-    private final Map<UUID, Long> clickDedup = new HashMap<>();
+    private final ProjectileTracker projectileTracker;
+    private final java.util.Map<UUID, Long> clickDedup = new java.util.HashMap<>();
 
-    public TriggerListener(Plugin plugin, ItemFactory itemFactory, ItemRepository repository, TriggerExecutor executor) {
+    public TriggerListener(Plugin plugin, ItemFactory itemFactory, ItemRepository repository, TriggerExecutor executor, ProjectileTracker projectileTracker) {
         this.plugin = plugin;
         this.itemFactory = itemFactory;
         this.repository = repository;
         this.executor = executor;
+        this.projectileTracker = projectileTracker;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -104,14 +103,23 @@ public final class TriggerListener implements Listener {
         Entity damager = directPlayerDamager(event.getDamager());
         if (damager instanceof Player player) {
             TriggerType type = event.getEntity() instanceof Player ? TriggerType.HIT_PLAYER : TriggerType.HIT_ENTITY;
-            fire(player, player.getInventory().getItemInMainHand(), type, ctx -> ctx.target(event.getEntity()));
+            fire(player, player.getInventory().getItemInMainHand(), type, ctx -> ctx.target(event.getEntity()).critical(criticalHit(player)));
         }
         if (event.getEntity() instanceof Player victim) {
             ItemStack item = victim.getInventory().getItemInMainHand();
             TriggerType type = damager instanceof Player ? TriggerType.HIT_BY_PLAYER : TriggerType.HIT_BY_ENTITY;
-            fire(victim, item, type, ctx -> ctx.target(event.getDamager()));
-            fire(victim, item, TriggerType.HIT_GLOBAL, ctx -> ctx.target(event.getDamager()));
+            boolean critical = damager instanceof Player player && criticalHit(player);
+            fire(victim, item, type, ctx -> ctx.target(event.getDamager()).critical(critical));
+            fire(victim, item, TriggerType.HIT_GLOBAL, ctx -> ctx.target(event.getDamager()).critical(critical));
         }
+    }
+
+    private boolean criticalHit(Player player) {
+        return player.getFallDistance() > 0.0f
+            && !player.isOnGround()
+            && !player.isInsideVehicle()
+            && !player.isSprinting()
+            && player.getAttackCooldown() > 0.9f;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -161,17 +169,24 @@ public final class TriggerListener implements Listener {
         if (!(shooter instanceof Player player)) {
             return;
         }
+        String suppressedItem = projectileTracker.consumeSuppressedLaunch(player);
+        if (suppressedItem != null) {
+            if (!suppressedItem.isBlank()) {
+                projectileTracker.track(event.getEntity(), suppressedItem);
+            }
+            return;
+        }
         ItemStack item = taggedHand(player);
         Optional<String> id = itemFactory.itemId(item);
         if (id.isPresent()) {
-            projectileItems.put(event.getEntity().getUniqueId(), id.get());
+            projectileTracker.track(event.getEntity(), id.get());
             fire(player, item, TriggerType.LAUNCH_PROJECTILE, ctx -> ctx.projectile(event.getEntity()));
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onProjectileHit(ProjectileHitEvent event) {
-        String itemId = projectileItems.remove(event.getEntity().getUniqueId());
+        String itemId = projectileTracker.remove(event.getEntity());
         if (itemId == null || !(event.getEntity().getShooter() instanceof Player player)) {
             return;
         }

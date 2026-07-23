@@ -1,5 +1,6 @@
 package com.bountysmp.configurableitems.storage;
 
+import com.bountysmp.configurableitems.action.ActionFormatter;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
 import com.bountysmp.configurableitems.util.ValidationUtil;
@@ -148,14 +149,15 @@ public final class ItemRepository {
             if (!commands.isEmpty()) {
                 List<Object> values = new ArrayList<>();
                 for (CustomItemDefinition.TriggerCommandDef command : commands) {
+                    String normalized = ActionFormatter.normalizeLine(command.command());
                     if (command.cooldownEnabled()) {
                         Map<String, Object> map = new LinkedHashMap<>();
-                        map.put("command", command.command());
+                        map.put("command", normalized);
                         map.put("cooldown-ticks", command.cooldownTicks());
                         map.put("cooldown-message", command.cooldownMessage());
                         values.add(map);
                     } else {
-                        values.add(command.command());
+                        values.add(normalized);
                     }
                 }
                 triggerSection.set(type.name(), values);
