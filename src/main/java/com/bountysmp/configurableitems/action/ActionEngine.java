@@ -2,6 +2,7 @@ package com.bountysmp.configurableitems.action;
 
 import com.bountysmp.configurableitems.storage.ItemRepository;
 import com.bountysmp.configurableitems.trigger.TriggerContext;
+import com.bountysmp.configurableitems.util.PlaceholderResolver;
 import com.bountysmp.configurableitems.util.TextUtil;
 import com.bountysmp.configurableitems.util.ValidationUtil;
 import java.util.ArrayDeque;
@@ -19,8 +20,10 @@ import java.util.Random;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -34,6 +37,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 public final class ActionEngine {
@@ -78,12 +82,17 @@ public final class ActionEngine {
             }
             ActionStep step = queue.removeFirst();
             if (step instanceof ActionStep.Simple simple) {
-                String line = context.replaceVariables(simple.line()).trim();
+                String line = simple.line().trim();
                 if (line.isBlank()) {
                     continue;
                 }
                 if (actionName(line).equals("DELAY_TICK")) {
-                    int ticks = Math.max(0, intArg(tokens(line), 1, 0));
+                    List<String> delayTokens = tokens(line);
+                    Optional<String> renderedTicks = renderRequired(context, token(delayTokens, 1, "0"), line);
+                    if (renderedTicks.isEmpty()) {
+                        continue;
+                    }
+                    int ticks = Math.max(0, intValue(renderedTicks.get(), 0));
                     schedule(context, queue, ticks);
                     return;
                 }
@@ -146,13 +155,32 @@ public final class ActionEngine {
             warn(context.triggerContext(), "Delayed action queues " + delayedQueues + " exceeds warning threshold " + config.warnDelayedQueues());
         }
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            delayedQueues = Math.max(0, delayedQueues - 1);
-            runQueue(context, queue);
+            try {
+                delayedQueues = Math.max(0, delayedQueues - 1);
+                runQueue(context, queue);
+            } catch (RuntimeException ex) {
+                runtimeError(context.triggerContext(), "delayed queue", ex);
+            }
         }, ticks);
     }
 
     private void runSimple(ActionExecutionContext context, String line) {
-        line = context.replaceVariables(line).trim();
+        try {
+            runSimpleUnchecked(context, line);
+        } catch (RuntimeException ex) {
+            runtimeError(context.triggerContext(), line, ex);
+        }
+    }
+
+    private void runSimpleUnchecked(ActionExecutionContext context, String rawLine) {
+        Optional<String> prepared = prepareLine(context, rawLine);
+        if (prepared.isEmpty()) {
+            return;
+        }
+        String line = prepared.get().trim();
+        if (line.isBlank()) {
+            return;
+        }
         String action = actionName(line);
         if (action.equals("CI_SET_VAR")) {
             String[] split = line.split("\\s+", 3);
@@ -166,8 +194,7 @@ public final class ActionEngine {
             return;
         }
         List<String> tokens = tokens(line);
-        if (ActionFormatter.isEntityActionName(action) && !context.hasLivingTarget()) {
-            warn(context.triggerContext(), action + " requires a living target");
+        if (ActionFormatter.isEntityActionName(action) && livingReceiver(context, tokens, action) == null) {
             return;
         }
         switch (action) {
@@ -177,17 +204,17 @@ public final class ActionEngine {
             case "NEAREST" -> runSelector(context, tokens, true, true, line);
             case "MOB_NEAREST" -> runSelector(context, tokens, false, true, line);
             case "HITSCAN" -> runHitscan(context, tokens, line);
-            case "DAMAGE" -> context.livingTarget().damage(doubleArg(tokens, "amount", 1, 0.0), context.self());
-            case "HEAL" -> heal(context, doubleArg(tokens, "amount", 1, -1.0));
-            case "SET_HEALTH" -> setHealth(context, doubleArg(tokens, "amount", 1, 1.0));
-            case "KILL" -> context.livingTarget().setHealth(0.0);
-            case "BURN" -> context.livingTarget().setFireTicks(Math.max(0, intArg(tokens, 1, 0)) * 20);
-            case "INVULNERABILITY" -> context.livingTarget().setNoDamageTicks(Math.max(0, intArg(tokens, 1, 0)));
+            case "DAMAGE" -> livingReceiver(context, tokens, action).damage(doubleArg(tokens, "amount", firstPositionalIndex(tokens), 0.0), context.self());
+            case "HEAL" -> heal(context, tokens);
+            case "SET_HEALTH" -> setHealth(context, tokens);
+            case "KILL" -> livingReceiver(context, tokens, action).setHealth(0.0);
+            case "BURN" -> livingReceiver(context, tokens, action).setFireTicks(Math.max(0, intArg(tokens, firstPositionalIndex(tokens), 0)) * 20);
+            case "INVULNERABILITY" -> livingReceiver(context, tokens, action).setNoDamageTicks(Math.max(0, intArg(tokens, firstPositionalIndex(tokens), 0)));
             case "TELEPORT" -> teleport(context, tokens);
-            case "VELOCITY" -> context.livingTarget().setVelocity(vector(tokens, 1));
+            case "VELOCITY" -> livingReceiver(context, tokens, action).setVelocity(vector(tokens, firstPositionalIndex(tokens)));
             case "DASH" -> context.self().setVelocity(context.self().getLocation().getDirection().normalize().multiply(doubleArg(tokens, "strength", 1, 1.0)));
-            case "SEND_MESSAGE" -> sendMessage(context, line.substring(action.length()).trim());
-            case "ACTIONBAR" -> actionbar(context, line.substring(action.length()).trim());
+            case "SEND_MESSAGE" -> sendMessage(context, tokens, line.substring(action.length()).trim());
+            case "ACTIONBAR" -> actionbar(context, tokens, line.substring(action.length()).trim());
             case "PARTICLE" -> particle(context, tokens);
             case "PARTICLE_LINE" -> particleLine(context, tokens);
             case "SET_BLOCK" -> setBlock(context, tokens);
@@ -197,6 +224,72 @@ public final class ActionEngine {
             case "VEINMINE" -> veinmine(context, tokens);
             default -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), line);
         }
+    }
+
+    private Optional<String> prepareLine(ActionExecutionContext context, String rawLine) {
+        String line = rawLine == null ? "" : rawLine.trim();
+        if (line.isBlank()) {
+            return Optional.of("");
+        }
+        String action = actionName(line);
+        if (action.equals("IF")) {
+            String[] pieces = line.substring(Math.min(2, line.length())).trim().split("\\s+", 2);
+            if (pieces.length < 2) {
+                return Optional.of(line);
+            }
+            Optional<String> condition = renderRequired(context, pieces[0], line);
+            return condition.map(value -> "IF " + value + " " + pieces[1]);
+        }
+        if (action.equals("AROUND") || action.equals("MOB_AROUND") || action.equals("NEAREST") || action.equals("MOB_NEAREST")) {
+            List<String> rawTokens = tokens(line);
+            if (rawTokens.size() < 2) {
+                return Optional.of(line);
+            }
+            Optional<String> radius = renderRequired(context, rawTokens.get(1), line);
+            return radius.map(value -> action + " " + value + " " + bodyAfter(rawTokens, 2));
+        }
+        if (action.equals("HITSCAN")) {
+            return prepareHitscanLine(context, line);
+        }
+        return renderRequired(context, line, line);
+    }
+
+    private Optional<String> prepareHitscanLine(ActionExecutionContext context, String line) {
+        List<String> rawTokens = tokens(line);
+        if (rawTokens.size() < 2) {
+            return Optional.of(line);
+        }
+        List<String> rendered = new ArrayList<>();
+        rendered.add(rawTokens.getFirst());
+        Optional<String> distance = renderRequired(context, rawTokens.get(1), line);
+        if (distance.isEmpty()) {
+            return Optional.empty();
+        }
+        rendered.add(distance.get());
+        int index = 2;
+        while (index < rawTokens.size() && HitscanOptions.isHitscanOption(rawTokens.get(index))) {
+            Optional<String> option = renderRequired(context, rawTokens.get(index), line);
+            if (option.isEmpty()) {
+                return Optional.empty();
+            }
+            rendered.add(option.get());
+            index++;
+        }
+        if (index < rawTokens.size()) {
+            rendered.add(bodyAfter(rawTokens, index));
+        }
+        return Optional.of(String.join(" ", rendered));
+    }
+
+    private Optional<String> renderRequired(ActionExecutionContext context, String input, String line) {
+        PlaceholderResolver.Result rendered = context.replaceVariables(input, false);
+        if (rendered.ok()) {
+            return Optional.of(rendered.output());
+        }
+        for (String error : rendered.errors()) {
+            warn(context.triggerContext(), error + " in: " + line);
+        }
+        return Optional.empty();
     }
 
     private void runIf(ActionExecutionContext context, String input) {
@@ -258,48 +351,86 @@ public final class ActionEngine {
                 warn(context.triggerContext(), "Unknown HITSCAN particle: " + options.particle());
             }
         }
-        List<RayHit> hits = rayEntities(context.self(), options.distance(), context.target(), options.targetMode());
-        int selectedCount = options.allHits() ? hits.size() : Math.min(options.maxHits(), hits.size());
+        RayTraceResult blockTrace = context.self().getWorld().rayTraceBlocks(
+            context.self().getEyeLocation(),
+            context.self().getEyeLocation().getDirection().normalize(),
+            options.distance(),
+            FluidCollisionMode.NEVER,
+            true
+        );
+        RayHit blockHit = blockTrace == null || blockTrace.getHitBlock() == null
+            ? null
+            : new RayHit(null, blockTrace.getHitBlock(), blockTrace.getHitPosition().toLocation(context.self().getWorld()), blockTrace.getHitPosition().distance(context.self().getEyeLocation().toVector()), HitKind.BLOCK);
+        List<RayHit> hits = options.targetMode() == HitscanOptions.TargetMode.BLOCK
+            ? (blockHit == null ? List.of() : List.of(blockHit))
+            : rayEntities(context.self(), options.distance(), blockHit == null ? options.distance() : blockHit.projection(), options.targetMode());
+        int selectedCount = options.targetMode() == HitscanOptions.TargetMode.BLOCK
+            ? Math.min(1, hits.size())
+            : options.allHits() ? hits.size() : Math.min(options.maxHits(), hits.size());
         Location particleEnd = context.self().getEyeLocation().clone().add(context.self().getEyeLocation().getDirection().normalize().multiply(options.distance()));
+        if (blockHit != null) {
+            particleEnd = blockHit.location();
+        }
         if (selectedCount > 0) {
             particleEnd = hits.get(selectedCount - 1).location();
             for (int i = 0; i < selectedCount; i++) {
-                ActionExecutionContext scoped = context.copy();
-                scoped.target(hits.get(i).entity());
-                ActionParser.splitInline(options.body()).forEach(part -> runSimple(scoped, part));
-            }
-        } else if (options.targetMode() == HitscanOptions.TargetMode.ANY) {
-            Block block = context.self().getTargetBlockExact(options.distance());
-            if (block != null) {
-                particleEnd = block.getLocation().add(0.5, 0.5, 0.5);
-                ActionExecutionContext scoped = context.copy();
-                scoped.block(block);
-                scoped.clearTarget();
-                ActionParser.splitInline(options.body()).forEach(part -> runSimple(scoped, part));
+                runHitscanBody(context, hits.get(i), options);
             }
         }
         if (particle != null) {
-            drawParticleRay(context.self().getEyeLocation(), particleEnd, particle, options.points(), options.offset(), options.speed());
+            drawParticleRay(context.triggerContext(), context.self().getEyeLocation(), particleEnd, particle, options.points(), options.offset(), options.particleSpeed(), options.speed());
         }
     }
 
-    private List<RayHit> rayEntities(Player player, int distance, Entity excludedSource, HitscanOptions.TargetMode targetMode) {
+    private void runHitscanBody(ActionExecutionContext context, RayHit hit, HitscanOptions options) {
+        Runnable action = () -> {
+            ActionExecutionContext scoped = context.copy();
+            if (hit.kind() == HitKind.BLOCK) {
+                scoped.block(hit.block());
+                scoped.hitBlock(hit.block(), hit.location());
+                scoped.clearTarget();
+            } else {
+                scoped.target(hit.entity());
+                scoped.hitEntity(hit.entity(), hit.location());
+            }
+            ActionParser.splitInline(options.body()).forEach(part -> runSimple(scoped, part));
+        };
+        if (options.speed().equalsIgnoreCase("instant")) {
+            action.run();
+            return;
+        }
+        double blocksPerSecond = doubleValue(options.speed(), -1.0);
+        if (blocksPerSecond <= 0.0) {
+            action.run();
+            return;
+        }
+        long delayTicks = Math.max(0L, Math.round((hit.projection() / blocksPerSecond) * 20.0));
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            try {
+                action.run();
+            } catch (RuntimeException ex) {
+                runtimeError(context.triggerContext(), options.body(), ex);
+            }
+        }, delayTicks);
+    }
+
+    private List<RayHit> rayEntities(Player player, int distance, double maxProjection, HitscanOptions.TargetMode targetMode) {
         Location eye = player.getEyeLocation();
         Vector direction = eye.getDirection().normalize();
         List<RayHit> hits = new ArrayList<>();
         for (Entity entity : player.getNearbyEntities(distance, distance, distance)) {
-            if (!matchesHitscanTarget(entity, targetMode) || sameEntity(entity, player) || sameEntity(entity, excludedSource)) {
+            if (!matchesHitscanTarget(entity, targetMode) || sameEntity(entity, player)) {
                 continue;
             }
             Location hitLocation = entity.getLocation().add(0, entity.getHeight() / 2.0, 0);
             Vector toEntity = hitLocation.toVector().subtract(eye.toVector());
             double projection = toEntity.dot(direction);
-            if (projection < 0 || projection > distance) {
+            if (projection < 0 || projection > distance || projection > maxProjection) {
                 continue;
             }
             double perpendicular = toEntity.clone().subtract(direction.clone().multiply(projection)).length();
             if (perpendicular <= 1.2) {
-                hits.add(new RayHit(entity, hitLocation, projection));
+                hits.add(new RayHit(entity, null, hitLocation, projection, HitKind.ENTITY));
             }
         }
         return hits.stream().sorted(Comparator.comparingDouble(RayHit::projection)).toList();
@@ -307,39 +438,92 @@ public final class ActionEngine {
 
     private boolean matchesHitscanTarget(Entity entity, HitscanOptions.TargetMode targetMode) {
         return switch (targetMode) {
-            case ANY -> entity instanceof LivingEntity;
             case PLAYER -> entity instanceof Player;
             case MOB -> entity instanceof LivingEntity && !(entity instanceof Player);
+            case ENTITY -> true;
+            case BLOCK -> false;
         };
     }
 
-    private void drawParticleRay(Location start, Location end, Particle particle, int points, double offset, double speed) {
+    private void drawParticleRay(TriggerContext context, Location start, Location end, Particle particle, int points, double offset, double speed, String raySpeed) {
         int safePoints = Math.max(1, points);
         Vector direction = end.toVector().subtract(start.toVector());
         double step = safePoints == 1 ? 0.0 : 1.0 / (safePoints - 1);
+        double blocksPerSecond = raySpeed.equalsIgnoreCase("instant") ? -1.0 : doubleValue(raySpeed, -1.0);
+        if (blocksPerSecond <= 0.0) {
+            for (int i = 0; i < safePoints; i++) {
+                Location point = start.clone().add(direction.clone().multiply(step * i));
+                point.getWorld().spawnParticle(particle, point, 1, offset, offset, offset, speed);
+            }
+            return;
+        }
+        List<Long> delays = particleRayDelays(direction.length(), safePoints, blocksPerSecond);
+        Map<Long, List<Location>> locationsByDelay = new HashMap<>();
         for (int i = 0; i < safePoints; i++) {
             Location point = start.clone().add(direction.clone().multiply(step * i));
-            point.getWorld().spawnParticle(particle, point, 1, offset, offset, offset, speed);
+            locationsByDelay.computeIfAbsent(delays.get(i), ignored -> new ArrayList<>()).add(point);
         }
+        locationsByDelay.forEach((delay, locations) -> {
+            Runnable spawn = () -> {
+                for (Location location : locations) {
+                    location.getWorld().spawnParticle(particle, location, 1, offset, offset, offset, speed);
+                }
+            };
+            if (delay <= 0L) {
+                spawn.run();
+            } else {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    try {
+                        spawn.run();
+                    } catch (RuntimeException ex) {
+                        runtimeError(context, "HITSCAN particle", ex);
+                    }
+                }, delay);
+            }
+        });
+    }
+
+    static List<Long> particleRayDelays(double distance, int points, double blocksPerSecond) {
+        int safePoints = Math.max(1, points);
+        double safeSpeed = Math.max(0.000001, blocksPerSecond);
+        double step = safePoints == 1 ? 0.0 : distance / (safePoints - 1);
+        List<Long> delays = new ArrayList<>();
+        for (int i = 0; i < safePoints; i++) {
+            delays.add(Math.max(0L, Math.round(((step * i) / safeSpeed) * 20.0)));
+        }
+        return delays;
     }
 
     static boolean sameEntity(Entity first, Entity second) {
         return first != null && second != null && (first == second || first.equals(second) || first.getUniqueId().equals(second.getUniqueId()));
     }
 
-    private record RayHit(Entity entity, Location location, double projection) {
+    private enum HitKind {
+        ENTITY,
+        BLOCK
     }
 
-    private void heal(ActionExecutionContext context, double amount) {
-        LivingEntity target = context.livingTarget();
+    private record RayHit(Entity entity, Block block, Location location, double projection, HitKind kind) {
+    }
+
+    private void heal(ActionExecutionContext context, List<String> tokens) {
+        LivingEntity target = livingReceiver(context, tokens, "HEAL");
+        if (target == null) {
+            return;
+        }
+        double amount = doubleArg(tokens, "amount", firstPositionalIndex(tokens), -1.0);
         double max = Optional.ofNullable(target.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH))
             .map(attribute -> attribute.getValue())
             .orElse(target.getHealth());
         target.setHealth(Math.min(max, amount < 0 ? max : target.getHealth() + amount));
     }
 
-    private void setHealth(ActionExecutionContext context, double amount) {
-        LivingEntity target = context.livingTarget();
+    private void setHealth(ActionExecutionContext context, List<String> tokens) {
+        LivingEntity target = livingReceiver(context, tokens, "SET_HEALTH");
+        if (target == null) {
+            return;
+        }
+        double amount = doubleArg(tokens, "amount", firstPositionalIndex(tokens), 1.0);
         double max = Optional.ofNullable(target.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH))
             .map(attribute -> attribute.getValue())
             .orElse(amount);
@@ -348,40 +532,155 @@ public final class ActionEngine {
 
     private void teleport(ActionExecutionContext context, List<String> tokens) {
         String targetArg = keyArg(tokens, "target");
-        if (targetArg != null) {
+        String toArg = keyArg(tokens, "to");
+        if (targetArg != null && toArg == null && tokens.size() == 2) {
+            warn(context.triggerContext(), "Legacy TELEPORT target:" + targetArg + " used; prefer TELEPORT target:<receiver> to:<destination>");
+            LivingEntity legacyCurrent = livingReceiver(context, List.of("TELEPORT", "target:CURRENT"), "TELEPORT");
+            if (legacyCurrent == null) {
+                return;
+            }
             if (targetArg.equalsIgnoreCase("SELF")) {
-                context.livingTarget().teleport(context.self());
+                legacyCurrent.teleport(context.self());
             } else if (targetArg.equalsIgnoreCase("TARGET") && context.triggerContext().target() != null) {
                 context.self().teleport(context.triggerContext().target());
             }
             return;
         }
+        LivingEntity receiver = livingReceiver(context, tokens, "TELEPORT");
+        if (receiver == null) {
+            return;
+        }
+        if (toArg != null) {
+            Location destination = locationArg(context, toArg, "TELEPORT");
+            if (destination != null) {
+                receiver.teleport(destination);
+            }
+            return;
+        }
         if (tokens.size() < 4) {
-            warn(context.triggerContext(), "TELEPORT requires x y z [world] or target:<SELF|TARGET>");
+            warn(context.triggerContext(), "TELEPORT requires target:<receiver> x y z [world] or target:<receiver> to:<destination>");
             return;
         }
-        World world = tokens.size() > 4 ? Bukkit.getWorld(tokens.get(4)) : context.location().getWorld();
+        int start = targetArg == null ? 1 : firstPositionalIndex(tokens);
+        if (tokens.size() <= start + 2) {
+            warn(context.triggerContext(), "TELEPORT requires x y z coordinates");
+            return;
+        }
+        World world = tokens.size() > start + 3 ? Bukkit.getWorld(tokens.get(start + 3)) : context.location().getWorld();
         if (world == null) {
-            warn(context.triggerContext(), "TELEPORT world not found: " + tokens.get(4));
+            warn(context.triggerContext(), "TELEPORT world not found: " + tokens.get(start + 3));
             return;
         }
-        context.livingTarget().teleport(new Location(world, doubleArg(tokens, 1, 0.0), doubleArg(tokens, 2, 0.0), doubleArg(tokens, 3, 0.0)));
+        receiver.teleport(new Location(world, doubleArg(tokens, start, 0.0), doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0)));
     }
 
     private Vector vector(List<String> tokens, int start) {
         return new Vector(doubleArg(tokens, start, 0.0), doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0));
     }
 
-    private void sendMessage(ActionExecutionContext context, String text) {
-        Entity target = context.target();
-        Player receiver = target instanceof Player player ? player : context.self();
-        receiver.sendMessage(TextUtil.legacy(text));
+    private LivingEntity livingReceiver(ActionExecutionContext context, List<String> tokens, String action) {
+        Entity entity = entityReceiver(context, keyArg(tokens, "target"), action);
+        if (entity instanceof LivingEntity living) {
+            return living;
+        }
+        warn(context.triggerContext(), action + " requires a living target");
+        return null;
     }
 
-    private void actionbar(ActionExecutionContext context, String text) {
-        Entity target = context.target();
-        Player receiver = target instanceof Player player ? player : context.self();
-        receiver.sendActionBar(TextUtil.legacy(text));
+    private Player playerReceiver(ActionExecutionContext context, List<String> tokens, String action) {
+        String targetArg = keyArg(tokens, "target");
+        Entity entity = entityReceiver(context, targetArg, action);
+        if (entity instanceof Player player) {
+            return player;
+        }
+        if (targetArg == null) {
+            return context.self();
+        }
+        warn(context.triggerContext(), action + " requires a player target");
+        return null;
+    }
+
+    private Entity entityReceiver(ActionExecutionContext context, String targetArg, String action) {
+        if (targetArg == null || targetArg.equalsIgnoreCase("CURRENT")) {
+            return context.target() == null ? context.self() : context.target();
+        }
+        if (targetArg.equalsIgnoreCase("SELF")) {
+            return context.self();
+        }
+        if (targetArg.equalsIgnoreCase("TARGET")) {
+            Entity current = context.target();
+            if (current != null && !sameEntity(current, context.self())) {
+                return current;
+            }
+            if (context.triggerContext().target() != null) {
+                return context.triggerContext().target();
+            }
+            warn(context.triggerContext(), action + " target:TARGET requires target context");
+            return null;
+        }
+        warn(context.triggerContext(), action + " target must be SELF, TARGET, or CURRENT: " + targetArg);
+        return null;
+    }
+
+    private Location locationArg(ActionExecutionContext context, String atArg, String action) {
+        if (atArg == null || atArg.equalsIgnoreCase("CURRENT")) {
+            return context.location();
+        }
+        if (atArg.equalsIgnoreCase("SELF")) {
+            return context.self().getLocation();
+        }
+        if (atArg.equalsIgnoreCase("TARGET")) {
+            Entity target = entityReceiver(context, "TARGET", action);
+            return target == null ? null : target.getLocation();
+        }
+        if (atArg.equalsIgnoreCase("BLOCK")) {
+            if (context.block() == null) {
+                warn(context.triggerContext(), action + " at:BLOCK requires block context");
+                return null;
+            }
+            return context.block().getLocation();
+        }
+        if (atArg.equalsIgnoreCase("HIT")) {
+            return variableLocation(context, "HIT_", action + " at:HIT requires hit context");
+        }
+        if (atArg.equalsIgnoreCase("PROJECTILE")) {
+            return variableLocation(context, "PROJECTILE_", action + " at:PROJECTILE requires projectile context");
+        }
+        warn(context.triggerContext(), action + " at must be SELF, TARGET, CURRENT, BLOCK, HIT, or PROJECTILE: " + atArg);
+        return null;
+    }
+
+    private Location variableLocation(ActionExecutionContext context, String prefix, String missingMessage) {
+        String worldName = context.variables().get(prefix + "WORLD");
+        String x = context.variables().get(prefix + "X");
+        String y = context.variables().get(prefix + "Y");
+        String z = context.variables().get(prefix + "Z");
+        if (worldName == null || x == null || y == null || z == null) {
+            warn(context.triggerContext(), missingMessage);
+            return null;
+        }
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            warn(context.triggerContext(), "World not found: " + worldName);
+            return null;
+        }
+        return new Location(world, doubleValue(x, 0.0), doubleValue(y, 0.0), doubleValue(z, 0.0));
+    }
+
+    private void sendMessage(ActionExecutionContext context, List<String> tokens, String text) {
+        Player receiver = playerReceiver(context, tokens, "SEND_MESSAGE");
+        if (receiver == null) {
+            return;
+        }
+        receiver.sendMessage(TextUtil.legacy(stripKeyToken(text, "target")));
+    }
+
+    private void actionbar(ActionExecutionContext context, List<String> tokens, String text) {
+        Player receiver = playerReceiver(context, tokens, "ACTIONBAR");
+        if (receiver == null) {
+            return;
+        }
+        receiver.sendActionBar(TextUtil.legacy(stripKeyToken(text, "target")));
     }
 
     private void particle(ActionExecutionContext context, List<String> tokens) {
@@ -389,15 +688,24 @@ public final class ActionEngine {
             warn(context.triggerContext(), "PARTICLE requires type and count");
             return;
         }
-        Particle particle = HitscanOptions.particleType(tokens.get(1));
-        if (particle == null) {
-            warn(context.triggerContext(), "Unknown particle: " + tokens.get(1));
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start + 1) {
+            warn(context.triggerContext(), "PARTICLE requires type and count");
             return;
         }
-        int count = Math.max(1, intArg(tokens, 2, 1));
-        double offset = doubleArg(tokens, 3, 0.1);
-        double speed = doubleArg(tokens, 4, 0.0);
-        context.location().getWorld().spawnParticle(particle, context.location(), count, offset, offset, offset, speed);
+        Particle particle = HitscanOptions.particleType(tokens.get(start));
+        if (particle == null) {
+            warn(context.triggerContext(), "Unknown particle: " + tokens.get(start));
+            return;
+        }
+        int count = Math.max(1, intArg(tokens, start + 1, 1));
+        double offset = doubleArg(tokens, start + 2, 0.1);
+        double speed = doubleArg(tokens, start + 3, 0.0);
+        Location location = locationArg(context, keyArg(tokens, "at"), "PARTICLE");
+        if (location == null) {
+            return;
+        }
+        location.getWorld().spawnParticle(particle, location, count, offset, offset, offset, speed);
     }
 
     private void particleLine(ActionExecutionContext context, List<String> tokens) {
@@ -405,19 +713,29 @@ public final class ActionEngine {
             warn(context.triggerContext(), "PARTICLE_LINE requires type, distance, and points");
             return;
         }
-        Particle particle = HitscanOptions.particleType(tokens.get(1));
-        if (particle == null) {
-            warn(context.triggerContext(), "Unknown particle: " + tokens.get(1));
+        int startIndex = firstPositionalIndex(tokens);
+        if (tokens.size() <= startIndex + 2) {
+            warn(context.triggerContext(), "PARTICLE_LINE requires type, distance, and points");
             return;
         }
-        double distance = Math.max(0.0, doubleArg(tokens, 2, 0.0));
-        int points = Math.max(1, intArg(tokens, 3, 1));
-        double offset = doubleArg(tokens, 4, 0.0);
-        double speed = doubleArg(tokens, 5, 0.0);
-        Location start = context.location().clone();
-        if (context.target() == context.self()) {
+        Particle particle = HitscanOptions.particleType(tokens.get(startIndex));
+        if (particle == null) {
+            warn(context.triggerContext(), "Unknown particle: " + tokens.get(startIndex));
+            return;
+        }
+        double distance = Math.max(0.0, doubleArg(tokens, startIndex + 1, 0.0));
+        int points = Math.max(1, intArg(tokens, startIndex + 2, 1));
+        double offset = doubleArg(tokens, startIndex + 3, 0.0);
+        double speed = doubleArg(tokens, startIndex + 4, 0.0);
+        String at = keyArg(tokens, "at");
+        Location start = locationArg(context, at, "PARTICLE_LINE");
+        if (start == null) {
+            return;
+        }
+        start = start.clone();
+        if ((at == null && context.target() == context.self()) || "SELF".equalsIgnoreCase(at)) {
             start = context.self().getEyeLocation();
-        } else if (context.block() != null) {
+        } else if ((at == null && context.block() != null) || "BLOCK".equalsIgnoreCase(at) || "HIT".equalsIgnoreCase(at)) {
             start.add(0.5, 0.5, 0.5);
         }
         Vector direction = context.self().getEyeLocation().getDirection();
@@ -523,14 +841,19 @@ public final class ActionEngine {
     }
 
     private void dropItem(ActionExecutionContext context, List<String> tokens) {
-        if (tokens.size() < 2) {
+        int start = firstPositionalIndex(tokens);
+        if (tokens.size() <= start) {
             warn(context.triggerContext(), "DROPITEM requires material");
             return;
         }
-        ValidationUtil.material(tokens.get(1)).ifPresentOrElse(material -> {
-            int amount = Math.max(1, intArg(tokens, 2, 1));
-            context.location().getWorld().dropItemNaturally(context.location(), new ItemStack(material, amount));
-        }, () -> warn(context.triggerContext(), "Invalid item material: " + tokens.get(1)));
+        ValidationUtil.material(tokens.get(start)).ifPresentOrElse(material -> {
+            int amount = Math.max(1, intArg(tokens, start + 1, 1));
+            Location location = locationArg(context, keyArg(tokens, "at"), "DROPITEM");
+            if (location == null) {
+                return;
+            }
+            location.getWorld().dropItemNaturally(location, new ItemStack(material, amount));
+        }, () -> warn(context.triggerContext(), "Invalid item material: " + tokens.get(start)));
     }
 
     private void veinmine(ActionExecutionContext context, List<String> tokens) {
@@ -646,11 +969,35 @@ public final class ActionEngine {
         if (context.block() != null) {
             return context.block();
         }
-        return context.self().getTargetBlockExact(8);
+        return null;
     }
 
     private void warn(TriggerContext context, String message) {
-        plugin.getLogger().warning("[actions] item=" + context.itemId() + " trigger=" + context.type() + " player=" + context.self().getName() + " " + message);
+        String detail = "[actions] item=" + context.itemId() + " trigger=" + context.type() + " player=" + context.self().getName() + " " + message;
+        if (context.self().isOp()) {
+            context.self().sendMessage(Component.text("[ConfigurableItems] " + message, NamedTextColor.RED));
+            return;
+        }
+        plugin.getLogger().warning(detail);
+    }
+
+    private void runtimeError(TriggerContext context, String line, RuntimeException ex) {
+        String message = "Action failed: " + line + " (" + rootMessage(ex) + ")";
+        String detail = "[actions] item=" + context.itemId() + " trigger=" + context.type() + " player=" + context.self().getName() + " " + message;
+        if (context.self().isOp()) {
+            context.self().sendMessage(Component.text("[ConfigurableItems] item=" + context.itemId() + " trigger=" + context.type() + " " + message, NamedTextColor.RED));
+            return;
+        }
+        plugin.getLogger().warning(detail);
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 
     private static String actionName(String line) {
@@ -673,8 +1020,12 @@ public final class ActionEngine {
         if (tokens.size() <= index) {
             return fallback;
         }
+        return intValue(tokens.get(index), fallback);
+    }
+
+    private static int intValue(String raw, int fallback) {
         try {
-            return Integer.parseInt(tokens.get(index));
+            return Integer.parseInt(raw.trim());
         } catch (NumberFormatException ex) {
             return fallback;
         }
@@ -684,11 +1035,7 @@ public final class ActionEngine {
         if (tokens.size() <= index) {
             return fallback;
         }
-        try {
-            return Double.parseDouble(tokens.get(index));
-        } catch (NumberFormatException ex) {
-            return fallback;
-        }
+        return doubleValue(tokens.get(index), fallback);
     }
 
     private static double doubleArg(List<String> tokens, String key, int positionalIndex, double fallback) {
@@ -716,5 +1063,34 @@ public final class ActionEngine {
             }
         }
         return null;
+    }
+
+    private static int firstPositionalIndex(List<String> tokens) {
+        for (int i = 1; i < tokens.size(); i++) {
+            if (!tokens.get(i).contains(":")) {
+                return i;
+            }
+        }
+        return tokens.size();
+    }
+
+    private static double doubleValue(String raw, double fallback) {
+        try {
+            return Double.parseDouble(raw);
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    private static String stripKeyToken(String text, String key) {
+        String prefix = key.toLowerCase(Locale.ROOT) + ":";
+        return List.of((text == null ? "" : text).trim().split("\\s+")).stream()
+            .filter(token -> !token.toLowerCase(Locale.ROOT).startsWith(prefix))
+            .reduce((left, right) -> left + " " + right)
+            .orElse("");
+    }
+
+    private static String token(List<String> tokens, int index, String fallback) {
+        return tokens.size() > index ? tokens.get(index) : fallback;
     }
 }

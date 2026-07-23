@@ -104,9 +104,13 @@ Do not include a leading `/` in console commands.
 
 Variables are written with curly braces. They are replaced before commands or actions run.
 
-Every trigger starts with a current context. At first, the context is usually `{SELF}`. Some triggers immediately add a target, block, or projectile. Selector actions, `HITSCAN`, block actions, and `PROJECTILE_TRAIL` can also move the current action context while nested actions run.
+Use explicit scoped variables for locations. `{SELF_X}`, `{SELF_Y}`, `{SELF_Z}`, and `{SELF_WORLD}` describe the triggering player. `{TARGET_*}`, `{BLOCK_*}`, `{HIT_*}`, and `{PROJECTILE_*}` describe nested or event-specific context. Generic `{X}`, `{Y}`, `{Z}`, and `{WORLD}` are not built-in variables.
 
-`{WORLD}`, `{X}`, `{Y}`, and `{Z}` always describe the current action location. They start at `{SELF}`'s location, then move when the context moves to a target entity, clicked/broken/placed block, hitscan block, selector target, or projectile trail location.
+Numeric expressions can be written inside placeholders when the referenced variables are numeric:
+
+```text
+fill {HIT_X-1} {HIT_Y-1} {HIT_Z-1} {HIT_X+1} {HIT_Y+1} {HIT_Z+1} minecraft:cobweb replace #air
+```
 
 Base variables are available on every trigger:
 
@@ -114,10 +118,10 @@ Base variables are available on every trigger:
 | --- | --- |
 | `{SELF}` | Player holding or using the item. |
 | `{SELF_UUID}` | UUID of `{SELF}`. |
-| `{WORLD}` | Current action context world. Starts as self world. |
-| `{X}` | Current action context block X coordinate. Starts as self X. |
-| `{Y}` | Current action context block Y coordinate. Starts as self Y. |
-| `{Z}` | Current action context block Z coordinate. Starts as self Z. |
+| `{SELF_WORLD}` | `{SELF}` world. |
+| `{SELF_X}` | `{SELF}` block X coordinate. |
+| `{SELF_Y}` | `{SELF}` block Y coordinate. |
+| `{SELF_Z}` | `{SELF}` block Z coordinate. |
 | `{ITEM_ID}` | ConfigurableItems YAML id. |
 | `{ITEM_NAME}` | Configured custom item name text. |
 
@@ -129,18 +133,32 @@ Target variables are available when the trigger starts with an entity target, or
 | `{TARGET_UUID}` | UUID of the target entity. |
 | `{ENTITY}` | Target entity registry id. |
 | `{ENTITY_UUID}` | UUID of the target entity. |
+| `{TARGET_WORLD}` | Target world. |
+| `{TARGET_X}` / `{TARGET_Y}` / `{TARGET_Z}` | Target block coordinates. |
 
 Block variables are available on block-specific triggers, or inside `HITSCAN`/block actions after a block is selected:
 
 | Variable | Value |
 | --- | --- |
 | `{BLOCK}` | Block registry id, for example `minecraft:stone`. |
+| `{BLOCK_WORLD}` | Block world. |
+| `{BLOCK_X}` / `{BLOCK_Y}` / `{BLOCK_Z}` | Block coordinates. |
+
+Hitscan variables are available inside `HITSCAN` bodies:
+
+| Variable | Value |
+| --- | --- |
+| `{HIT_TYPE}` | `ENTITY` or `BLOCK`. |
+| `{HIT_WORLD}` | Hit world. |
+| `{HIT_X}` / `{HIT_Y}` / `{HIT_Z}` | Hit coordinates. |
 
 Projectile variables are available for projectile triggers:
 
 | Variable | Value |
 | --- | --- |
 | `{PROJECTILE}` | Projectile entity registry id. |
+| `{PROJECTILE_WORLD}` | Projectile world. |
+| `{PROJECTILE_X}` / `{PROJECTILE_Y}` / `{PROJECTILE_Z}` | Projectile coordinates. |
 
 `FOR` loops can create dynamic variables. Use lowercase or mixed-case variable names such as `{tier}` or `{for1}`. Uppercase unknown variables are rejected during GUI save validation because uppercase names are reserved for trigger context variables.
 
@@ -155,7 +173,7 @@ END_FOR color
 - Use `RIGHT_CLICK_BLOCK` or `LEFT_CLICK_BLOCK` when you need `{BLOCK}` from a click. `RIGHT_CLICK` and `LEFT_CLICK` are broad click triggers and do not validate `{BLOCK}`.
 - Use `AROUND`, `NEAREST`, `MOB_AROUND`, `MOB_NEAREST`, or `HITSCAN` when a trigger does not start with a target but nested actions need `{TARGET}`.
 - Use `{PROJECTILE}` only in `LAUNCH_PROJECTILE`, `PROJECTILE_HIT_BLOCK`, `PROJECTILE_HIT_ENTITY`, and `PROJECTILE_HIT_PLAYER`.
-- Use `{WORLD}`, `{X}`, `{Y}`, and `{Z}` for the current action location. In nested selector or hitscan actions, that location may be the selected target or block instead of `{SELF}`.
+- Use `{SELF_WORLD}`, `{SELF_X}`, `{SELF_Y}`, and `{SELF_Z}` for `{SELF}`. Use scoped coordinate variables for selected targets, blocks, hits, and projectiles.
 
 ### Trigger Reference
 
@@ -165,7 +183,7 @@ END_FOR color
 | `RIGHT_CLICK_BLOCK` | Player right-clicks a block with the item in main hand. | Self, block. |
 | `LEFT_CLICK` | Player left-clicks air or block with the item in main hand. | Self. |
 | `LEFT_CLICK_BLOCK` | Player left-clicks a block with the item in main hand. | Self, block. |
-| `ALL_CLICK` | Any left or right click handled by the click listener. | Self, optional block. |
+| `ALL_CLICK` | Any left or right click handled by the click listener. | Self. |
 | `CONSUME` | Player consumes the item. | Self. |
 | `BLOCK_BREAK` | Player breaks a block with the item in main hand. | Self, block. |
 | `BLOCK_PLACE` | Player places the item as a block. | Self, block. |
@@ -192,7 +210,7 @@ END_FOR color
 
 Notes:
 
-- Click triggers only listen to the main hand and deduplicate likely double fires within a short window. They handle Paper's cancelled air/no-op interact events so air clicks can fire; denied block interactions are still skipped. `RIGHT_CLICK` and `LEFT_CLICK` stay broad for compatibility; use `RIGHT_CLICK_BLOCK` and `LEFT_CLICK_BLOCK` when `{BLOCK}` is needed.
+- Click triggers only listen to the main hand and deduplicate likely double fires within a short window. They handle Paper's cancelled air/no-op interact events so air clicks can fire; denied block interactions are still skipped. `RIGHT_CLICK`, `LEFT_CLICK`, and `ALL_CLICK` always use self coordinates; use `RIGHT_CLICK_BLOCK` and `LEFT_CLICK_BLOCK` when `{BLOCK}` or `{BLOCK_X}` is needed.
 - Projectile hit triggers are linked to the item id recorded when the projectile launched.
 - Most non-click trigger listeners use `ignoreCancelled = true`. If a configured restriction cancels drop, placement, consumption, crafting, enchant/anvil, or tool interaction, matching triggers do not fire for that cancelled event.
 - `HIT_BY_*` and `DEATH` currently check the player's main hand item.
@@ -265,13 +283,15 @@ PARTICLE EXPLOSION 3 0.1 0
 
 Delayed queues stop if the player logs out or the item definition no longer exists.
 
+`DELAY_TICK` only affects actions after it in the same queue or body. GUI save validation rejects it when it is the last action.
+
 ### `IF <condition> <action...>`
 
 Runs the action body if the condition is true.
 
 ```text
-IF {X}>100 SEND_MESSAGE &aYou are east of x=100
-IF {WORLD}=world_nether DAMAGE 4
+IF {SELF_X}>100 SEND_MESSAGE &aYou are east of x=100
+IF {SELF_WORLD}=world_nether DAMAGE 4
 IF {TARGET}!={SELF} SEND_MESSAGE &eTarget: {TARGET}
 ```
 
@@ -290,13 +310,13 @@ Supported logical operators:
 Keep the condition as one token without spaces. This is valid:
 
 ```text
-IF {X}>=0&&{Y}>60 SEND_MESSAGE &aHigh ground
+IF {SELF_X}>=0&&{SELF_Y}>60 SEND_MESSAGE &aHigh ground
 ```
 
 This is not valid because the current parser treats the first space as the start of the action body:
 
 ```text
-IF {X} >= 0 SEND_MESSAGE &aBad spacing
+IF {SELF_X} >= 0 SEND_MESSAGE &aBad spacing
 ```
 
 Numeric comparisons are used when both sides parse as numbers. Otherwise, string comparisons are used.
@@ -378,61 +398,65 @@ Runs the nested action for the nearest nearby living non-player mob.
 MOB_NEAREST 12 BURN 4
 ```
 
-### `HITSCAN <distance> [target:ANY|PLAYER|MOB] [max-hits:<n>|max-hits:all] [particle:<type>] [points:<n>] [offset:<value>] [speed:<value>] <action...>`
+### `HITSCAN <distance> [target:ENTITY|PLAYER|MOB|BLOCK] [max-hits:<n>|max-hits:all] [speed:instant|<blocksPerSecond>] [particle:<type>] [points:<n>] [offset:<value>] [particle-speed:<value>] <action...>`
 
-Looks along `{SELF}`'s view direction. By default, it targets the first living entity found near the ray. If no entity is found, `target:ANY` targets the first exact block in range. `target:PLAYER` only selects players, and `target:MOB` only selects living non-player mobs. Use `max-hits` to run the nested action for multiple matching entities in nearest-first order. If `particle` is set, ConfigurableItems draws a trail along the ray.
+Looks along `{SELF}`'s view direction. Raycasts always stop at the first blocking block. `target:ENTITY` is the default and selects entities before that block. `target:PLAYER` only selects players, `target:MOB` only selects living non-player mobs, and `target:BLOCK` ignores entities and selects the first block. Use `max-hits` for entity modes. Use `speed:<blocksPerSecond>` to delay the nested action until the ray reaches each hit; `speed:instant` is the default. If `particle` is set, ConfigurableItems draws the trail at the same ray speed.
+
+Inside the nested body, HITSCAN exposes `{HIT_TYPE}`, `{HIT_WORLD}`, `{HIT_X}`, `{HIT_Y}`, and `{HIT_Z}`. Entity modes also expose target variables. Block mode exposes block variables.
 
 ```text
-HITSCAN 32 DAMAGE 5
-HITSCAN 32 SET_TEMP_BLOCK GLOWSTONE 60
-HITSCAN 32 target:PLAYER max-hits:all particle:CRIT points:24 ACTIONBAR &cMarked
+HITSCAN 32 target:ENTITY DAMAGE 5 target:TARGET
+HITSCAN 32 target:BLOCK SET_TEMP_BLOCK GLOWSTONE 60
+HITSCAN 32 target:PLAYER max-hits:all speed:80 particle:CRIT points:24 ACTIONBAR target:TARGET &cMarked
+HITSCAN 32 target:BLOCK speed:1 particle:CRIT points:32 minecraft:fill {HIT_X-1} {HIT_Y-1} {HIT_Z-1} {HIT_X+1} {HIT_Y+1} {HIT_Z+1} minecraft:cobweb replace #air
 ```
+
+Old HITSCAN particle velocity written as `speed:<small decimal>` with a `particle:` option is normalized to `particle-speed:<value>`. Use `speed:` for ray travel speed.
 
 ## Entity And Player Actions
 
-Entity actions use the current action target. If no target exists, the target defaults to `{SELF}`.
+Entity actions accept `target:SELF`, `target:TARGET`, or `target:CURRENT`. If omitted, `target:CURRENT` is used for legacy configs. `target:TARGET` requires a trigger, selector, or HITSCAN entity context.
 
 | Action | Description |
 | --- | --- |
-| `DAMAGE <amount>` | Damages the current living target. Supports `amount:<value>`. |
-| `HEAL [amount]` | Heals the current living target. Omit amount to heal to max health. |
-| `SET_HEALTH <amount>` | Sets current living target health, clamped to valid health range. |
-| `KILL` | Sets current living target health to `0`. |
-| `BURN <seconds>` | Sets current living target fire ticks. |
-| `INVULNERABILITY <ticks>` | Sets current living target no-damage ticks. |
-| `TELEPORT <x> <y> <z> [world]` | Teleports current living target to coordinates. Uses current world if omitted. |
-| `TELEPORT target:SELF` | Teleports current living target to `{SELF}`. |
-| `TELEPORT target:TARGET` | Teleports `{SELF}` to the original trigger target, if one exists. |
-| `VELOCITY <x> <y> <z>` | Sets current living target velocity. |
+| `DAMAGE <amount> [target:<receiver>]` | Damages the selected living receiver. Supports `amount:<value>`. |
+| `HEAL [amount] [target:<receiver>]` | Heals the selected living receiver. Omit amount to heal to max health. |
+| `SET_HEALTH <amount> [target:<receiver>]` | Sets selected living receiver health, clamped to valid health range. |
+| `KILL [target:<receiver>]` | Sets selected living receiver health to `0`. |
+| `BURN <seconds> [target:<receiver>]` | Sets selected living receiver fire ticks. |
+| `INVULNERABILITY <ticks> [target:<receiver>]` | Sets selected living receiver no-damage ticks. |
+| `TELEPORT target:<receiver> <x> <y> <z> [world]` | Teleports selected receiver to coordinates. Uses current world if omitted. |
+| `TELEPORT target:<receiver> to:SELF|TARGET|CURRENT|HIT|BLOCK` | Teleports selected receiver to a context location. |
+| `VELOCITY <x> <y> <z> [target:<receiver>]` | Sets selected living receiver velocity. |
 | `DASH <strength>` | Pushes `{SELF}` forward in their look direction. |
 
 Examples:
 
 ```text
 DAMAGE 4
-MOB_AROUND 8 DAMAGE amount:2
-NEAREST 12 TELEPORT target:SELF
+MOB_AROUND 8 DAMAGE amount:2 target:TARGET
+NEAREST 12 TELEPORT target:TARGET to:SELF
 ```
 
-In a `HIT_PLAYER` trigger folder, `DAMAGE 4` damages the hit player because that player is the current target.
+In a `HIT_PLAYER` trigger folder, `DAMAGE 4` still damages the hit player through legacy `target:CURRENT`. New GUI entries write the receiver explicitly.
 
 ## Messaging And Visual Actions
 
 | Action | Description |
 | --- | --- |
-| `SEND_MESSAGE <text>` | Sends a chat message to the current player target, or `{SELF}` if the target is not a player. Supports `&` color/style codes. |
-| `ACTIONBAR <text>` | Sends an actionbar message to the current player target, or `{SELF}` if the target is not a player. Supports `&` color/style codes. |
-| `PARTICLE <type> <count> [offset] [speed]` | Spawns a Bukkit particle at the current action location. |
-| `PARTICLE_LINE <type> <distance> <points> [offset] [speed]` | Spawns one particle per point in a line from the current action location along the player's look direction. |
+| `SEND_MESSAGE [target:<receiver>] <text>` | Sends a chat message to the selected player receiver. Omitted target keeps legacy current-player-or-self behavior. Supports `&` color/style codes. |
+| `ACTIONBAR [target:<receiver>] <text>` | Sends an actionbar message to the selected player receiver. Omitted target keeps legacy current-player-or-self behavior. Supports `&` color/style codes. |
+| `PARTICLE <type> <count> [offset] [speed] [at:<location>]` | Spawns a Bukkit particle at `SELF`, `TARGET`, `CURRENT`, `BLOCK`, `HIT`, or `PROJECTILE`. Omitted `at:` keeps legacy current location behavior. |
+| `PARTICLE_LINE <type> <distance> <points> [offset] [speed] [at:<location>]` | Spawns one particle per point in a line from the selected location along the player's look direction. |
 | `PROJECTILE_TRAIL [particle:<type>] [count:<n>] [points:<n>] [interval:<ticks>] [duration:<ticks>] [offset:<value>] [speed:<value>]` / `END_PROJECTILE_TRAIL` | Runs nested actions at the current projectile location until the projectile stops or duration expires. Intended for `LAUNCH_PROJECTILE`. |
 
 Examples:
 
 ```text
-SEND_MESSAGE &aItem ready.
-ACTIONBAR &eCooldown complete
-PARTICLE FLAME 20 0.2 0.01
-PARTICLE_LINE FLAME 8 24 0 0
+SEND_MESSAGE target:SELF &aItem ready.
+ACTIONBAR target:TARGET &eMarked
+PARTICLE FLAME 20 0.2 0.01 at:SELF
+PARTICLE_LINE FLAME 8 24 0 0 at:HIT
 PROJECTILE_TRAIL particle:FLAME points:3 interval:1 duration:100 offset:0 speed:0
 PARTICLE CRIT 2 0.05 0
 AROUND 1.5 DAMAGE 2
@@ -445,14 +469,14 @@ Particle types are validated against the Paper/Bukkit particle registry.
 
 ## Block And Item Actions
 
-Block actions use the current context block when available. If no block is in context, they use `{SELF}`'s target block within 8 blocks.
+Block actions require block context. Use block triggers such as `RIGHT_CLICK_BLOCK`, `LEFT_CLICK_BLOCK`, `BLOCK_BREAK`, `BLOCK_PLACE`, `PROJECTILE_HIT_BLOCK`, or `HITSCAN target:BLOCK`.
 
 | Action | Description |
 | --- | --- |
 | `SET_BLOCK <material>` | Sets the current block to a block material. |
 | `SET_TEMP_BLOCK <material> <ticks>` | Temporarily changes the current block, then restores its old material. |
 | `BREAK_BLOCK [drop:true|false]` | Breaks the current block. Defaults to dropping items. |
-| `DROPITEM <material> [amount]` | Drops an item at the current action location. |
+| `DROPITEM <material> [amount] [at:<location>]` | Drops an item at `SELF`, `TARGET`, `CURRENT`, `BLOCK`, `HIT`, or `PROJECTILE`. |
 | `VEINMINE [limit] [drop:true|false] [filter:<material|#tag>[,<material|#tag>...]] [match:all|same-type] [mode:destroy|replace] [replace:<material>] [use-enchants:true|false] [use-durability:true|false] [effect:true|false] [xp:true|false]` | Breaks or replaces connected blocks from the current block. Defaults limit to the configured veinmine warning threshold. |
 
 Examples:
@@ -558,7 +582,7 @@ actions:
     warn-delayed-queues: 500
 ```
 
-Warnings include the item id, trigger, player name, and threshold detail. They are meant to catch costly item designs during testing without silently changing behavior.
+Warnings include the item id, trigger, player name, and threshold detail. If the triggering player is OP, ConfigurableItems sends the warning or runtime command/action error to that player; otherwise it writes a concise warning to the server log. They are meant to catch costly or invalid item designs during testing without silently changing behavior.
 
 Practical guidance:
 
@@ -569,7 +593,7 @@ Practical guidance:
 
 ## Parser Errors
 
-The parser logs warnings and continues where possible.
+The parser reports warnings and continues where possible.
 
 Common errors:
 

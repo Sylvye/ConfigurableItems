@@ -4,11 +4,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ActionParser {
     private static final Pattern NUMERIC_FOR = Pattern.compile("^\\s*([A-Za-z0-9_]+)\\s*=\\s*([^;]+)\\s*;\\s*([^;]+)\\s*;\\s*([^;]+)\\s*$");
+    private static final Set<String> RESERVED_FOR_VARIABLES = Set.of("X", "Y", "Z", "WORLD");
 
     private ActionParser() {
     }
@@ -140,6 +142,7 @@ public final class ActionParser {
             Matcher numeric = NUMERIC_FOR.matcher(spec);
             if (numeric.matches()) {
                 String variable = numeric.group(1).trim();
+                validateForVariable(variable, raw);
                 List<String> values = numericValues(numeric.group(2), numeric.group(3), numeric.group(4), raw);
                 if (!arrowVariable.isBlank() && !arrowVariable.equalsIgnoreCase(variable)) {
                     errors.add("FOR variable mismatch: " + raw);
@@ -159,7 +162,14 @@ public final class ActionParser {
                 variable = "for";
                 errors.add("Missing FOR variable: " + raw);
             }
+            validateForVariable(variable, raw);
             return new ForSpec(values, variable);
+        }
+
+        private void validateForVariable(String variable, String raw) {
+            if (RESERVED_FOR_VARIABLES.contains(variable.toUpperCase(Locale.ROOT))) {
+                errors.add("FOR variable is reserved: " + variable + " in: " + raw);
+            }
         }
 
         private List<String> numericValues(String rawStart, String rawStep, String rawCount, String source) {

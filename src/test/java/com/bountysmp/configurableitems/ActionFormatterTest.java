@@ -12,6 +12,7 @@ final class ActionFormatterTest {
         assertEquals("DAMAGE {SELF}", ActionFormatter.normalizeLine("damage {self}"));
         assertEquals("HITSCAN 24 DAMAGE {TARGET} <+> PARTICLE flame 10", ActionFormatter.normalizeLine("hitscan 24 damage {Target} <+> particle flame 10"));
         assertEquals("HITSCAN 24 target:PLAYER max-hits:all particle:FLAME points:8 DAMAGE 3", ActionFormatter.normalizeLine("hitscan 24 target:player max-hits:ALL particle:flame points:8 damage 3"));
+        assertEquals("HITSCAN 24 target:ENTITY particle:FLAME particle-speed:0.02 DAMAGE 3", ActionFormatter.normalizeLine("hitscan 24 target:entity particle:flame speed:0.02 damage 3"));
         assertEquals("VEINMINE 64 filter:#minecraft:logs mode:replace replace:STONE use-durability:false", ActionFormatter.normalizeLine("veinmine 64 filter:#Minecraft:Logs mode:REPLACE replace:stone use-durability:FALSE"));
         assertEquals("VEINMINE 64 filter:OAK_LOG,#minecraft:leaves,minecraft:diamond_ore", ActionFormatter.normalizeLine("veinmine 64 filter:oak_log,#Minecraft:Leaves,minecraft:diamond_ore"));
         assertEquals("VEINMINE 64 filter:#minecraft:logs match:same-type", ActionFormatter.normalizeLine("veinmine 64 filter:#Minecraft:Logs match:SAME-TYPE"));

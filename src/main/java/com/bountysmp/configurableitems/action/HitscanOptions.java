@@ -12,7 +12,8 @@ public record HitscanOptions(
     String particle,
     int points,
     double offset,
-    double speed,
+    String speed,
+    double particleSpeed,
     String body,
     List<String> errors
 ) {
@@ -20,9 +21,10 @@ public record HitscanOptions(
     private static final int DEFAULT_POINTS = 24;
 
     public enum TargetMode {
-        ANY,
         PLAYER,
-        MOB
+        MOB,
+        ENTITY,
+        BLOCK
     }
 
     public boolean allHits() {
@@ -50,12 +52,14 @@ public record HitscanOptions(
             errors.add("HITSCAN requires distance and action body");
         }
 
-        TargetMode targetMode = TargetMode.ANY;
+        TargetMode targetMode = TargetMode.ENTITY;
         Integer maxHits = 1;
         String particle = "";
         int points = DEFAULT_POINTS;
         double offset = 0.0;
-        double speed = 0.0;
+        String speed = "instant";
+        double particleSpeed = 0.0;
+        String pendingSpeed = null;
 
         while (index < tokens.size() && isOption(tokens.get(index))) {
             String token = tokens.get(index);
@@ -66,7 +70,7 @@ public record HitscanOptions(
                     try {
                         targetMode = TargetMode.valueOf(value.toUpperCase(Locale.ROOT));
                     } catch (IllegalArgumentException ex) {
-                        errors.add("HITSCAN target must be ANY, PLAYER, or MOB: " + value);
+                        errors.add("HITSCAN target must be PLAYER, MOB, ENTITY, or BLOCK: " + value);
                     }
                 }
                 case "max-hits" -> {
@@ -104,25 +108,32 @@ public record HitscanOptions(
                     }
                 }
                 case "speed" -> {
+                    pendingSpeed = value;
+                }
+                case "particle-speed" -> {
                     Double parsed = doubleValue(value);
                     if (parsed == null) {
-                        errors.add("HITSCAN speed must be a number: " + value);
+                        errors.add("HITSCAN particle-speed must be a number: " + value);
                     } else {
-                        speed = parsed;
+                        particleSpeed = parsed;
                     }
                 }
                 default -> {
-                    return new HitscanOptions(distance, targetMode, maxHits, particle, points, offset, speed, bodyAfter(tokens, index), List.copyOf(errors));
+                    SpeedValues speeds = resolveSpeed(pendingSpeed, particle, speed, particleSpeed, errors);
+                    return new HitscanOptions(distance, targetMode, maxHits, particle, points, offset, speeds.speed(), speeds.particleSpeed(), bodyAfter(tokens, index), List.copyOf(errors));
                 }
             }
             index++;
         }
 
+        SpeedValues speeds = resolveSpeed(pendingSpeed, particle, speed, particleSpeed, errors);
+        speed = speeds.speed();
+        particleSpeed = speeds.particleSpeed();
         String body = bodyAfter(tokens, index);
         if (body.isBlank()) {
             errors.add("HITSCAN is missing an action body");
         }
-        return new HitscanOptions(distance, targetMode, maxHits, particle, points, offset, speed, body, List.copyOf(errors));
+        return new HitscanOptions(distance, targetMode, maxHits, particle, points, offset, speed, particleSpeed, body, List.copyOf(errors));
     }
 
     public static boolean isHitscanOption(String token) {
@@ -154,7 +165,33 @@ public record HitscanOptions(
             || lower.startsWith("particle:")
             || lower.startsWith("points:")
             || lower.startsWith("offset:")
-            || lower.startsWith("speed:");
+            || lower.startsWith("speed:")
+            || lower.startsWith("particle-speed:");
+    }
+
+    private static SpeedValues resolveSpeed(String pendingSpeed, String particle, String speed, double particleSpeed, List<String> errors) {
+        if (pendingSpeed == null) {
+            return new SpeedValues(speed, particleSpeed);
+        }
+        if (pendingSpeed.equalsIgnoreCase("instant")) {
+            return new SpeedValues("instant", particleSpeed);
+        }
+        Double parsed = doubleValue(pendingSpeed);
+        if (parsed == null) {
+            errors.add("HITSCAN speed must be instant or a positive blocks-per-second number: " + pendingSpeed);
+            return new SpeedValues(speed, particleSpeed);
+        }
+        if (!particle.isBlank() && parsed >= 0.0 && parsed < 1.0) {
+            return new SpeedValues(speed, parsed);
+        }
+        if (parsed <= 0.0) {
+            errors.add("HITSCAN speed must be instant or a positive blocks-per-second number: " + pendingSpeed);
+            return new SpeedValues(speed, particleSpeed);
+        }
+        return new SpeedValues(String.valueOf(parsed), particleSpeed);
+    }
+
+    private record SpeedValues(String speed, double particleSpeed) {
     }
 
     private static Integer positiveInt(String raw) {

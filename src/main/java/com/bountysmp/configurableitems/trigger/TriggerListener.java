@@ -61,33 +61,17 @@ public final class TriggerListener implements Listener {
             return;
         }
         if (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
-            fire(event.getPlayer(), event.getItem(), TriggerType.RIGHT_CLICK, ctx -> {
-                if (event.getClickedBlock() != null) {
-                    ctx.block(event.getClickedBlock());
-                }
-            });
+            fire(event.getPlayer(), event.getItem(), TriggerType.RIGHT_CLICK, ctx -> {});
             if (event.getClickedBlock() != null) {
                 fire(event.getPlayer(), event.getItem(), TriggerType.RIGHT_CLICK_BLOCK, ctx -> ctx.block(event.getClickedBlock()));
             }
-            fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {
-                if (event.getClickedBlock() != null) {
-                    ctx.block(event.getClickedBlock());
-                }
-            });
+            fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {});
         } else if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
-            fire(event.getPlayer(), event.getItem(), TriggerType.LEFT_CLICK, ctx -> {
-                if (event.getClickedBlock() != null) {
-                    ctx.block(event.getClickedBlock());
-                }
-            });
+            fire(event.getPlayer(), event.getItem(), TriggerType.LEFT_CLICK, ctx -> {});
             if (event.getClickedBlock() != null) {
                 fire(event.getPlayer(), event.getItem(), TriggerType.LEFT_CLICK_BLOCK, ctx -> ctx.block(event.getClickedBlock()));
             }
-            fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {
-                if (event.getClickedBlock() != null) {
-                    ctx.block(event.getClickedBlock());
-                }
-            });
+            fire(event.getPlayer(), event.getItem(), TriggerType.ALL_CLICK, ctx -> {});
         }
     }
 

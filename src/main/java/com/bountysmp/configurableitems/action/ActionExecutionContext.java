@@ -1,12 +1,12 @@
 package com.bountysmp.configurableitems.action;
 
 import com.bountysmp.configurableitems.trigger.TriggerContext;
+import com.bountysmp.configurableitems.util.PlaceholderResolver;
 import java.util.HashMap;
 import java.util.Map;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 
 final class ActionExecutionContext {
@@ -46,14 +46,6 @@ final class ActionExecutionContext {
         return target;
     }
 
-    LivingEntity livingTarget() {
-        return target instanceof LivingEntity living ? living : self();
-    }
-
-    boolean hasLivingTarget() {
-        return target instanceof LivingEntity;
-    }
-
     Location location() {
         if (location != null) {
             return location;
@@ -73,7 +65,7 @@ final class ActionExecutionContext {
         this.target = target == null ? self() : target;
         this.location = this.target.getLocation();
         this.block = null;
-        putEntityVariables(this.target);
+        putTargetVariables(this.target);
     }
 
     void clearTarget() {
@@ -84,7 +76,7 @@ final class ActionExecutionContext {
         this.location = location;
         this.block = location == null ? null : location.getBlock();
         if (location != null) {
-            putLocationVariables(location);
+            putProjectileLocationVariables(location);
         }
     }
 
@@ -93,9 +85,23 @@ final class ActionExecutionContext {
         this.location = block == null ? null : block.getLocation();
         if (block != null) {
             variables.put("BLOCK", block.getType().key().asString());
-            variables.put("WORLD", block.getWorld().getName());
-            putLocationVariables(block.getLocation());
+            variables.put("BLOCK_WORLD", block.getWorld().getName());
+            putLocationVariables("BLOCK_", block.getLocation());
         }
+    }
+
+    void hitEntity(Entity entity, Location location) {
+        variables.put("HIT_TYPE", "ENTITY");
+        putHitLocationVariables(location == null ? entity.getLocation() : location);
+        putTargetVariables(entity);
+    }
+
+    void hitBlock(Block block, Location location) {
+        variables.put("HIT_TYPE", "BLOCK");
+        putHitLocationVariables(location == null ? block.getLocation() : location);
+        variables.put("BLOCK", block.getType().key().asString());
+        variables.put("BLOCK_WORLD", block.getWorld().getName());
+        putLocationVariables("BLOCK_", block.getLocation());
     }
 
     void putVariable(String key, String value) {
@@ -103,26 +109,32 @@ final class ActionExecutionContext {
         variables.put(key.toUpperCase(), value);
     }
 
-    String replaceVariables(String input) {
-        String output = input;
-        for (Map.Entry<String, String> entry : variables.entrySet()) {
-            output = output.replace("{" + entry.getKey() + "}", entry.getValue());
-        }
-        return output;
+    PlaceholderResolver.Result replaceVariables(String input, boolean allowUnresolved) {
+        return PlaceholderResolver.render(input, variables, allowUnresolved);
     }
 
-    private void putEntityVariables(Entity entity) {
+    private void putTargetVariables(Entity entity) {
         variables.put("TARGET", entity instanceof Player player ? player.getName() : entity.getType().key().asString());
         variables.put("TARGET_UUID", entity.getUniqueId().toString());
         variables.put("ENTITY", entity.getType().key().asString());
         variables.put("ENTITY_UUID", entity.getUniqueId().toString());
-        variables.put("WORLD", entity.getWorld().getName());
-        putLocationVariables(entity.getLocation());
+        variables.put("TARGET_WORLD", entity.getWorld().getName());
+        putLocationVariables("TARGET_", entity.getLocation());
     }
 
-    private void putLocationVariables(Location location) {
-        variables.put("X", String.valueOf(location.getBlockX()));
-        variables.put("Y", String.valueOf(location.getBlockY()));
-        variables.put("Z", String.valueOf(location.getBlockZ()));
+    private void putProjectileLocationVariables(Location location) {
+        variables.put("PROJECTILE_WORLD", location.getWorld().getName());
+        putLocationVariables("PROJECTILE_", location);
+    }
+
+    private void putHitLocationVariables(Location location) {
+        variables.put("HIT_WORLD", location.getWorld().getName());
+        putLocationVariables("HIT_", location);
+    }
+
+    private void putLocationVariables(String prefix, Location location) {
+        variables.put(prefix + "X", String.valueOf(location.getBlockX()));
+        variables.put(prefix + "Y", String.valueOf(location.getBlockY()));
+        variables.put(prefix + "Z", String.valueOf(location.getBlockZ()));
     }
 }

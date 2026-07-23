@@ -26,8 +26,8 @@ public final class TriggerContext {
         this.self = self;
         put("SELF", self.getName());
         put("SELF_UUID", self.getUniqueId().toString());
-        put("WORLD", self.getWorld().getName());
-        putLocation(self.getLocation());
+        put("SELF_WORLD", self.getWorld().getName());
+        putLocation("SELF_", self.getLocation());
         put("ITEM_ID", itemId);
         put("ITEM_NAME", itemName);
     }
@@ -71,7 +71,8 @@ public final class TriggerContext {
             put("TARGET_UUID", entity.getUniqueId().toString());
             put("ENTITY", entity.getType().key().asString());
             put("ENTITY_UUID", entity.getUniqueId().toString());
-            putLocation(entity.getLocation());
+            put("TARGET_WORLD", entity.getWorld().getName());
+            putLocation("TARGET_", entity.getLocation());
         }
         return this;
     }
@@ -80,8 +81,8 @@ public final class TriggerContext {
         if (block != null) {
             this.block = block;
             put("BLOCK", block.getType().key().asString());
-            put("WORLD", block.getWorld().getName());
-            putLocation(block.getLocation());
+            put("BLOCK_WORLD", block.getWorld().getName());
+            putLocation("BLOCK_", block.getLocation());
         }
         return this;
     }
@@ -90,14 +91,16 @@ public final class TriggerContext {
         if (projectile != null) {
             this.projectile = projectile;
             put("PROJECTILE", projectile.getType().key().asString());
+            put("PROJECTILE_WORLD", projectile.getWorld().getName());
+            putLocation("PROJECTILE_", projectile.getLocation());
         }
         return this;
     }
 
-    private void putLocation(Location location) {
-        put("X", String.valueOf(location.getBlockX()));
-        put("Y", String.valueOf(location.getBlockY()));
-        put("Z", String.valueOf(location.getBlockZ()));
+    private void putLocation(String prefix, Location location) {
+        put(prefix + "X", String.valueOf(location.getBlockX()));
+        put(prefix + "Y", String.valueOf(location.getBlockY()));
+        put(prefix + "Z", String.valueOf(location.getBlockZ()));
     }
 
     private void put(String key, String value) {

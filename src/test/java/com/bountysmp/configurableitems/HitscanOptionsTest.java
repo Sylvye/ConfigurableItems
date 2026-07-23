@@ -16,7 +16,7 @@ final class HitscanOptionsTest {
 
         assertTrue(options.errors().isEmpty());
         assertEquals(32, options.distance());
-        assertEquals(HitscanOptions.TargetMode.ANY, options.targetMode());
+        assertEquals(HitscanOptions.TargetMode.ENTITY, options.targetMode());
         assertEquals(1, options.maxHits());
         assertFalse(options.allHits());
         assertEquals("DAMAGE 5", options.body());
@@ -46,7 +46,8 @@ final class HitscanOptionsTest {
         assertEquals("FLAME", options.particle());
         assertEquals(12, options.points());
         assertEquals(0.1, options.offset());
-        assertEquals(0.02, options.speed());
+        assertEquals("instant", options.speed());
+        assertEquals(0.02, options.particleSpeed());
         assertEquals("DAMAGE 3", options.body());
     }
 

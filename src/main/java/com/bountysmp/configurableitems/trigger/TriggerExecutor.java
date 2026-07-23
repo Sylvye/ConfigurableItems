@@ -4,6 +4,7 @@ import com.bountysmp.configurableitems.action.ActionEngine;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
 import com.bountysmp.configurableitems.storage.ItemRepository;
+import com.bountysmp.configurableitems.util.PlaceholderResolver;
 import com.bountysmp.configurableitems.util.TextUtil;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,10 +21,11 @@ import org.bukkit.plugin.Plugin;
 
 public final class TriggerExecutor {
     private static final Pattern VARIABLE = Pattern.compile("\\{([A-Za-z0-9_]+)}");
-    private static final Set<String> BASE_VARIABLES = Set.of("SELF", "SELF_UUID", "WORLD", "X", "Y", "Z", "ITEM_ID", "ITEM_NAME");
-    private static final Set<String> TARGET_VARIABLES = Set.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID");
-    private static final Set<String> BLOCK_VARIABLES = Set.of("BLOCK");
-    private static final Set<String> PROJECTILE_VARIABLES = Set.of("PROJECTILE");
+    private static final Set<String> BASE_VARIABLES = Set.of("SELF", "SELF_UUID", "SELF_WORLD", "SELF_X", "SELF_Y", "SELF_Z", "ITEM_ID", "ITEM_NAME");
+    private static final Set<String> TARGET_VARIABLES = Set.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z");
+    private static final Set<String> BLOCK_VARIABLES = Set.of("BLOCK", "BLOCK_WORLD", "BLOCK_X", "BLOCK_Y", "BLOCK_Z");
+    private static final Set<String> PROJECTILE_VARIABLES = Set.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z");
+    private static final Set<String> RESERVED_FOR_VARIABLES = Set.of("X", "Y", "Z", "WORLD");
 
     private final Plugin plugin;
     private final ItemRepository repository;
@@ -54,12 +56,12 @@ public final class TriggerExecutor {
             if (isBlockHeader(upper)) {
                 CooldownCheck cooldown = checkCooldown(context, i, command, now);
                 if (!cooldown.active()) {
-                    Optional<String> rendered = render(raw, context);
-                    if (rendered.isEmpty()) {
-                        plugin.getLogger().warning("Skipped " + context.type() + " command for " + context.itemId() + " because a variable was missing: " + raw);
+                    PlaceholderResolver.Result rendered = render(raw, context);
+                    if (!rendered.ok()) {
+                        reportRenderErrors(context, raw, rendered.errors());
                         continue;
                     }
-                    renderedCommands.add(rendered.get());
+                    renderedCommands.add(rendered.output());
                     continue;
                 }
                 sendCooldownMessage(context, command, cooldown.remainingSeconds());
@@ -73,12 +75,12 @@ public final class TriggerExecutor {
                     continue;
                 }
             }
-            Optional<String> rendered = render(raw, context);
-            if (rendered.isEmpty()) {
-                plugin.getLogger().warning("Skipped " + context.type() + " command for " + context.itemId() + " because a variable was missing: " + raw);
+            PlaceholderResolver.Result rendered = render(raw, context);
+            if (!rendered.ok()) {
+                reportRenderErrors(context, raw, rendered.errors());
                 continue;
             }
-            renderedCommands.add(rendered.get());
+            renderedCommands.add(rendered.output());
         }
         actionEngine.execute(context, renderedCommands);
     }
@@ -106,10 +108,14 @@ public final class TriggerExecutor {
         List<String> forStack = new ArrayList<>();
         for (CustomItemDefinition.TriggerCommandDef command : commands) {
             String raw = command.command();
-            parseForVariable(raw).ifPresent(variable -> {
-                scopedVariables.add(variable);
-                forStack.add(variable);
-            });
+            Optional<String> forVariable = parseForVariable(raw);
+            if (forVariable.isPresent()) {
+                if (RESERVED_FOR_VARIABLES.contains(forVariable.get())) {
+                    return Optional.of(forVariable.get());
+                }
+                scopedVariables.add(forVariable.get());
+                forStack.add(forVariable.get());
+            }
             Optional<String> invalid = invalidVariable(raw, type, scopedVariables);
             if (invalid.isPresent()) {
                 return invalid;
@@ -145,20 +151,17 @@ public final class TriggerExecutor {
         return Optional.empty();
     }
 
-    public static Optional<String> render(String command, TriggerContext context) {
-        Matcher matcher = VARIABLE.matcher(command);
-        StringBuffer output = new StringBuffer();
-        while (matcher.find()) {
-            String variable = matcher.group(1).toUpperCase(Locale.ROOT);
-            String value = context.variables().get(variable);
-            if (value == null) {
-                matcher.appendReplacement(output, Matcher.quoteReplacement("{" + matcher.group(1) + "}"));
-                continue;
-            }
-            matcher.appendReplacement(output, Matcher.quoteReplacement(value));
+    public static PlaceholderResolver.Result render(String command, TriggerContext context) {
+        return PlaceholderResolver.render(command, context.variables(), true);
+    }
+
+    private void reportRenderErrors(TriggerContext context, String raw, List<String> errors) {
+        String message = "Skipped " + context.type() + " command for " + context.itemId() + ": " + String.join("; ", errors) + " in: " + raw;
+        if (context.self().isOp()) {
+            context.self().sendMessage(TextUtil.legacy("&c[ConfigurableItems] " + message));
+            return;
         }
-        matcher.appendTail(output);
-        return Optional.of(output.toString());
+        plugin.getLogger().warning(message);
     }
 
     private CooldownCheck checkCooldown(TriggerContext context, int commandIndex, CustomItemDefinition.TriggerCommandDef command, long now) {
@@ -184,8 +187,8 @@ public final class TriggerExecutor {
             return;
         }
         String message = command.cooldownMessage().replace("{COOLDOWN}", String.valueOf(remainingSeconds));
-        String rendered = render(message, context).orElse(message);
-        context.self().sendMessage(TextUtil.legacy(rendered));
+        PlaceholderResolver.Result rendered = render(message, context);
+        context.self().sendMessage(TextUtil.legacy(rendered.ok() ? rendered.output() : message));
     }
 
     static long secondsRemaining(long until, long now) {

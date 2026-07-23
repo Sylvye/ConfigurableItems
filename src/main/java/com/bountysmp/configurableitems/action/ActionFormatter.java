@@ -127,6 +127,7 @@ public final class ActionFormatter {
         String[] tokens = rest.split("\\s+");
         int index = 0;
         StringBuilder header = new StringBuilder(first);
+        boolean hasParticleOption = List.of(tokens).stream().anyMatch(token -> token.toLowerCase(Locale.ROOT).startsWith("particle:"));
         if (index < tokens.length) {
             header.append(' ').append(tokens[index]);
             index++;
@@ -135,16 +136,30 @@ public final class ActionFormatter {
             String token = tokens[index];
             String key = token.substring(0, token.indexOf(':')).toLowerCase(Locale.ROOT);
             String value = token.substring(token.indexOf(':') + 1);
+            if (key.equals("speed") && hasParticleOption && legacyParticleSpeed(value)) {
+                key = "particle-speed";
+            }
             if (key.equals("target") || key.equals("particle")) {
                 value = value.toUpperCase(Locale.ROOT);
             } else if (key.equals("max-hits") && value.equalsIgnoreCase("all")) {
                 value = "all";
+            } else if (key.equals("speed") && value.equalsIgnoreCase("instant")) {
+                value = "instant";
             }
             header.append(' ').append(key).append(':').append(value);
             index++;
         }
         String body = index < tokens.length ? String.join(" ", List.of(tokens).subList(index, tokens.length)) : "";
         return body.isBlank() ? header.toString() : header + " " + normalizeInline(body);
+    }
+
+    private static boolean legacyParticleSpeed(String value) {
+        try {
+            double parsed = Double.parseDouble(value);
+            return parsed >= 0.0 && parsed < 1.0;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
     }
 
     private static String normalizeVeinmine(String first, String rest) {
