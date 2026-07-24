@@ -12,11 +12,11 @@ import java.util.regex.Pattern;
 public final class ActionValidator {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([^{}]+)}");
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
-    private static final Set<String> BASE_VARIABLES = Set.of("SELF", "SELF_UUID", "SELF_WORLD", "SELF_X", "SELF_Y", "SELF_Z", "ITEM_ID", "ITEM_NAME");
-    private static final Set<String> TARGET_VARIABLES = Set.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z");
+    private static final Set<String> BASE_VARIABLES = Set.of("SELF", "SELF_UUID", "SELF_WORLD", "SELF_X", "SELF_Y", "SELF_Z", "SELF_BLOCK_X", "SELF_BLOCK_Y", "SELF_BLOCK_Z", "ITEM_ID", "ITEM_NAME");
+    private static final Set<String> TARGET_VARIABLES = Set.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z", "TARGET_BLOCK_X", "TARGET_BLOCK_Y", "TARGET_BLOCK_Z");
     private static final Set<String> BLOCK_VARIABLES = Set.of("BLOCK", "BLOCK_WORLD", "BLOCK_X", "BLOCK_Y", "BLOCK_Z");
-    private static final Set<String> PROJECTILE_VARIABLES = Set.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z");
-    private static final Set<String> HIT_VARIABLES = Set.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z");
+    private static final Set<String> PROJECTILE_VARIABLES = Set.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z", "PROJECTILE_BLOCK_X", "PROJECTILE_BLOCK_Y", "PROJECTILE_BLOCK_Z");
+    private static final Set<String> HIT_VARIABLES = Set.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z", "HIT_BLOCK_X", "HIT_BLOCK_Y", "HIT_BLOCK_Z");
     private static final Set<String> BLOCK_ACTIONS = Set.of("SET_BLOCK", "SET_TEMP_BLOCK", "BREAK_BLOCK", "VEINMINE");
     private static final Set<String> RESERVED_FOR_VARIABLES = Set.of("X", "Y", "Z", "WORLD");
     private static final Set<TriggerType> DAMAGE_TRIGGERS = Set.of(

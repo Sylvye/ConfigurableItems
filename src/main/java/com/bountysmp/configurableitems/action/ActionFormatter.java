@@ -100,7 +100,7 @@ public final class ActionFormatter {
             return normalizeKeyValues(first, rest, Set.of("type", "target"), Set.of("type"));
         }
         if (!line.contains("<+>") && (first.equals("TELEPORT") || first.equals("LAUNCH_PROJECTILE") || first.equals("IMPULSE") || first.equals("EXPLODE"))) {
-            return normalizeKeyValues(first, rest, Set.of("target", "to", "safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks", "power", "radius", "speed"), Set.of("safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks"));
+            return normalizeKeyValues(first, rest, Set.of("target", "to", "safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks", "power", "radius", "speed", "world"), Set.of("safe", "gravity", "track", "targets", "normalize", "fire", "break-blocks"));
         }
         if (isSelector(first)) {
             return normalizeSelector(first, rest);

@@ -56,7 +56,7 @@ final class ActionValidatorTest {
         assertTrue(ActionValidator.invalidKnownAction(List.of("SEND_MESSAGE {TICKS}"), TriggerType.RIGHT_CLICK).orElseThrow().contains("TICKS"));
         assertTrue(ActionValidator.invalidKnownAction(List.of(
             "HITBOX shape:SPHERE size:3 targets:PLAYER,BLOCK",
-            "SEND_MESSAGE target:SELF {TARGET_X} {BLOCK_X} {HIT_X}",
+            "SEND_MESSAGE target:SELF {TARGET_X} {TARGET_BLOCK_X} {BLOCK_X} {HIT_X} {HIT_BLOCK_X}",
             "END_HITBOX"
         ), TriggerType.RIGHT_CLICK).isEmpty());
         assertTrue(ActionValidator.invalidKnownAction(List.of("HITBOX shape:BAD size:3", "DAMAGE 1", "END_HITBOX"), TriggerType.RIGHT_CLICK).orElseThrow().contains("shape"));
@@ -80,10 +80,10 @@ final class ActionValidatorTest {
             "NEAREST 8 target:ENTITY SEND_MESSAGE &e{TARGET_UUID}"
         ), TriggerType.RIGHT_CLICK).isEmpty());
         assertTrue(ActionValidator.invalidKnownAction(List.of(
-            "HITSCAN 24 target:ENTITY SEND_MESSAGE target:TARGET &e{TARGET_X},{HIT_X}"
+            "HITSCAN 24 target:ENTITY SEND_MESSAGE target:TARGET &e{TARGET_X},{TARGET_BLOCK_X},{HIT_X},{HIT_BLOCK_X}"
         ), TriggerType.RIGHT_CLICK).isEmpty());
         assertTrue(ActionValidator.invalidKnownAction(List.of(
-            "HITSCAN 24 target:BLOCK minecraft:fill {HIT_X-1} {HIT_Y-1} {HIT_Z-1} {HIT_X+1} {HIT_Y+1} {HIT_Z+1} minecraft:cobweb replace #air"
+            "HITSCAN 24 target:BLOCK minecraft:fill {HIT_BLOCK_X-1} {HIT_BLOCK_Y-1} {HIT_BLOCK_Z-1} {HIT_BLOCK_X+1} {HIT_BLOCK_Y+1} {HIT_BLOCK_Z+1} minecraft:cobweb replace #air"
         ), TriggerType.RIGHT_CLICK).isEmpty());
         assertTrue(ActionValidator.invalidKnownAction(List.of(
             "SEND_MESSAGE &e{TARGET_X}"

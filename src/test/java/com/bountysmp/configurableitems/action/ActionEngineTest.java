@@ -71,6 +71,20 @@ final class ActionEngineTest {
     }
 
     @Test
+    void explodeWorldNameIgnoresKeyValueOptions() {
+        assertEquals(null, ActionEngine.explodeWorldName(List.of("EXPLODE", "2", "1", "2", "3", "fire:false", "break-blocks:true"), 1));
+        assertEquals("world_nether", ActionEngine.explodeWorldName(List.of("EXPLODE", "2", "1", "2", "3", "world_nether", "fire:false"), 1));
+        assertEquals("world_the_end", ActionEngine.explodeWorldName(List.of("EXPLODE", "2", "1", "2", "3", "world:world_the_end", "fire:false"), 1));
+    }
+
+    @Test
+    void teleportWorldNameIgnoresKeyValueOptions() {
+        assertEquals(null, ActionEngine.teleportWorldName(List.of("TELEPORT", "target:CURRENT", "1", "2", "3", "safe:false"), 2));
+        assertEquals("world", ActionEngine.teleportWorldName(List.of("TELEPORT", "target:CURRENT", "1", "2", "3", "world", "safe:false"), 2));
+        assertEquals("world_nether", ActionEngine.teleportWorldName(List.of("TELEPORT", "target:CURRENT", "1", "2", "3", "world:world_nether", "safe:false"), 2));
+    }
+
+    @Test
     void evaluatesHitboxShapes() {
         assertTrue(ActionEngine.hitboxIncludes(HitboxOptions.Shape.SPHERE, 2, new Vector(), new Vector(1, 1, 0), new Vector(0, 0, 1)));
         assertFalse(ActionEngine.hitboxIncludes(HitboxOptions.Shape.CUBE, 2, new Vector(), new Vector(3, 0, 0), new Vector(0, 0, 1)));

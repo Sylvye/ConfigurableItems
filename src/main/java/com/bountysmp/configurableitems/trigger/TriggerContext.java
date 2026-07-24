@@ -82,7 +82,7 @@ public final class TriggerContext {
             this.block = block;
             put("BLOCK", block.getType().key().asString());
             put("BLOCK_WORLD", block.getWorld().getName());
-            putLocation("BLOCK_", block.getLocation());
+            putBlockLocation("BLOCK_", block.getLocation());
         }
         return this;
     }
@@ -108,6 +108,13 @@ public final class TriggerContext {
     }
 
     private void putLocation(String prefix, Location location) {
+        put(prefix + "X", String.valueOf(location.getX()));
+        put(prefix + "Y", String.valueOf(location.getY()));
+        put(prefix + "Z", String.valueOf(location.getZ()));
+        putBlockLocation(prefix + "BLOCK_", location);
+    }
+
+    private void putBlockLocation(String prefix, Location location) {
         put(prefix + "X", String.valueOf(location.getBlockX()));
         put(prefix + "Y", String.valueOf(location.getBlockY()));
         put(prefix + "Z", String.valueOf(location.getBlockZ()));

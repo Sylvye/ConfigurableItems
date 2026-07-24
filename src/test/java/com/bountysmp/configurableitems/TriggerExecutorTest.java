@@ -20,6 +20,14 @@ final class TriggerExecutorTest {
     }
 
     @Test
+    void allowsBlockCoordinateVariantsInMatchingScopes() {
+        assertTrue(TriggerExecutor.invalidVariable("say {SELF_BLOCK_X}", TriggerType.RIGHT_CLICK).isEmpty());
+        assertTrue(TriggerExecutor.invalidVariable("say {TARGET_BLOCK_X}", TriggerType.HIT_PLAYER).isEmpty());
+        assertTrue(TriggerExecutor.invalidVariable("say {PROJECTILE_BLOCK_X}", TriggerType.LAUNCH_PROJECTILE).isEmpty());
+        assertEquals("TARGET_BLOCK_X", TriggerExecutor.invalidVariable("say {TARGET_BLOCK_X}", TriggerType.RIGHT_CLICK).orElseThrow());
+    }
+
+    @Test
     void allowsTargetVariablesForHitTriggers() {
         assertTrue(TriggerExecutor.invalidVariable("effect give {TARGET} speed", TriggerType.HIT_PLAYER).isEmpty());
         assertEquals("TARGET", TriggerExecutor.invalidVariable("effect give {TARGET} speed", TriggerType.CONSUME).orElseThrow());

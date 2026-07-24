@@ -106,10 +106,12 @@ Variables are written with curly braces. They are replaced before commands or ac
 
 Use explicit scoped variables for locations. `{SELF_X}`, `{SELF_Y}`, `{SELF_Z}`, and `{SELF_WORLD}` describe the triggering player. `{TARGET_*}`, `{BLOCK_*}`, `{HIT_*}`, and `{PROJECTILE_*}` describe nested or event-specific context. Generic `{X}`, `{Y}`, `{Z}`, and `{WORLD}` are not built-in variables.
 
+Entity, hit, and projectile `*_X/Y/Z` variables use exact decimal `Location` coordinates. Use `*_BLOCK_X/Y/Z` when a command needs integer block coordinates. `{BLOCK_X}`, `{BLOCK_Y}`, and `{BLOCK_Z}` are already block coordinates because they refer to an actual block.
+
 Numeric expressions can be written inside placeholders when the referenced variables are numeric:
 
 ```text
-fill {HIT_X-1} {HIT_Y-1} {HIT_Z-1} {HIT_X+1} {HIT_Y+1} {HIT_Z+1} minecraft:cobweb replace #air
+fill {HIT_BLOCK_X-1} {HIT_BLOCK_Y-1} {HIT_BLOCK_Z-1} {HIT_BLOCK_X+1} {HIT_BLOCK_Y+1} {HIT_BLOCK_Z+1} minecraft:cobweb replace #air
 ```
 
 Base variables are available on every trigger:
@@ -119,9 +121,8 @@ Base variables are available on every trigger:
 | `{SELF}` | Player holding or using the item. |
 | `{SELF_UUID}` | UUID of `{SELF}`. |
 | `{SELF_WORLD}` | `{SELF}` world. |
-| `{SELF_X}` | `{SELF}` block X coordinate. |
-| `{SELF_Y}` | `{SELF}` block Y coordinate. |
-| `{SELF_Z}` | `{SELF}` block Z coordinate. |
+| `{SELF_X}` / `{SELF_Y}` / `{SELF_Z}` | `{SELF}` exact decimal coordinates. |
+| `{SELF_BLOCK_X}` / `{SELF_BLOCK_Y}` / `{SELF_BLOCK_Z}` | `{SELF}` block coordinates. |
 | `{ITEM_ID}` | ConfigurableItems YAML id. |
 | `{ITEM_NAME}` | Configured custom item name text. |
 
@@ -134,7 +135,8 @@ Target variables are available when the trigger starts with an entity target, or
 | `{ENTITY}` | Target entity registry id. |
 | `{ENTITY_UUID}` | UUID of the target entity. |
 | `{TARGET_WORLD}` | Target world. |
-| `{TARGET_X}` / `{TARGET_Y}` / `{TARGET_Z}` | Target block coordinates. |
+| `{TARGET_X}` / `{TARGET_Y}` / `{TARGET_Z}` | Target exact decimal coordinates. |
+| `{TARGET_BLOCK_X}` / `{TARGET_BLOCK_Y}` / `{TARGET_BLOCK_Z}` | Target block coordinates. |
 
 Block variables are available on block-specific triggers, or inside `HITSCAN`/block actions after a block is selected:
 
@@ -150,7 +152,8 @@ Hitscan variables are available inside `HITSCAN` bodies:
 | --- | --- |
 | `{HIT_TYPE}` | `ENTITY` or `BLOCK`. |
 | `{HIT_WORLD}` | Hit world. |
-| `{HIT_X}` / `{HIT_Y}` / `{HIT_Z}` | Hit coordinates. |
+| `{HIT_X}` / `{HIT_Y}` / `{HIT_Z}` | Hit exact decimal coordinates. |
+| `{HIT_BLOCK_X}` / `{HIT_BLOCK_Y}` / `{HIT_BLOCK_Z}` | Hit block coordinates. |
 
 Projectile variables are available for projectile triggers:
 
@@ -158,7 +161,8 @@ Projectile variables are available for projectile triggers:
 | --- | --- |
 | `{PROJECTILE}` | Projectile entity registry id. |
 | `{PROJECTILE_WORLD}` | Projectile world. |
-| `{PROJECTILE_X}` / `{PROJECTILE_Y}` / `{PROJECTILE_Z}` | Projectile coordinates. |
+| `{PROJECTILE_X}` / `{PROJECTILE_Y}` / `{PROJECTILE_Z}` | Projectile exact decimal coordinates. |
+| `{PROJECTILE_BLOCK_X}` / `{PROJECTILE_BLOCK_Y}` / `{PROJECTILE_BLOCK_Z}` | Projectile block coordinates. |
 
 Damage triggers expose:
 
@@ -179,7 +183,7 @@ END_FOR color
 - Use `RIGHT_CLICK_BLOCK` or `LEFT_CLICK_BLOCK` when you need `{BLOCK}` from a click. `RIGHT_CLICK` and `LEFT_CLICK` are broad click triggers and do not validate `{BLOCK}`.
 - Use `AROUND`, `NEAREST`, `HITSCAN`, or `HITBOX` when a trigger does not start with a target but nested actions need `{TARGET}`.
 - Use `{PROJECTILE}` only in the `LAUNCH_PROJECTILE` action, the `LAUNCH_PROJECTILE` trigger, `PROJECTILE_HIT_BLOCK`, `PROJECTILE_HIT_ENTITY`, and `PROJECTILE_HIT_PLAYER`.
-- Use `{SELF_WORLD}`, `{SELF_X}`, `{SELF_Y}`, and `{SELF_Z}` for `{SELF}`. Use scoped coordinate variables for selected targets, blocks, hits, and projectiles.
+- Use `{SELF_WORLD}`, `{SELF_X}`, `{SELF_Y}`, and `{SELF_Z}` for `{SELF}` exact coordinates. Use scoped coordinate variables for selected targets, blocks, hits, and projectiles.
 
 ### Trigger Reference
 
@@ -407,13 +411,13 @@ Legacy `MOB_AROUND <radius> ...` and `MOB_NEAREST <radius> ...` still run, but n
 
 Looks along `{SELF}`'s view direction. Raycasts always stop at the first blocking block. `target:ENTITY` is the default and selects entities before that block. `target:PLAYER` only selects players, `target:MOB` only selects living non-player entities, and `target:BLOCK` ignores entities and selects the first block. Use `max-hits` for entity modes. Use `speed:<blocksPerSecond>` to delay the nested action until the ray reaches each hit; `speed:instant` is the default. If `particle` is set, ConfigurableItems draws the trail at the same ray speed.
 
-Inside the nested body, HITSCAN exposes `{HIT_TYPE}`, `{HIT_WORLD}`, `{HIT_X}`, `{HIT_Y}`, and `{HIT_Z}`. Entity modes also expose target variables. Block mode exposes block variables.
+Inside the nested body, HITSCAN exposes `{HIT_TYPE}`, `{HIT_WORLD}`, `{HIT_X}`, `{HIT_Y}`, `{HIT_Z}`, and `{HIT_BLOCK_X/Y/Z}`. Entity modes also expose target variables. Block mode exposes block variables.
 
 ```text
 HITSCAN 32 target:ENTITY DAMAGE 5 target:TARGET
 HITSCAN 32 target:BLOCK SET_TEMP_BLOCK GLOWSTONE 60
 HITSCAN 32 target:PLAYER max-hits:all speed:80 particle:CRIT points:24 ACTIONBAR target:TARGET &cMarked
-HITSCAN 32 target:BLOCK speed:1 particle:CRIT points:32 minecraft:fill {HIT_X-1} {HIT_Y-1} {HIT_Z-1} {HIT_X+1} {HIT_Y+1} {HIT_Z+1} minecraft:cobweb replace #air
+HITSCAN 32 target:BLOCK speed:1 particle:CRIT points:32 minecraft:fill {HIT_BLOCK_X-1} {HIT_BLOCK_Y-1} {HIT_BLOCK_Z-1} {HIT_BLOCK_X+1} {HIT_BLOCK_Y+1} {HIT_BLOCK_Z+1} minecraft:cobweb replace #air
 ```
 
 Old HITSCAN particle velocity written as `speed:<small decimal>` with a `particle:` option is normalized to `particle-speed:<value>`. Use `speed:` for ray travel speed.

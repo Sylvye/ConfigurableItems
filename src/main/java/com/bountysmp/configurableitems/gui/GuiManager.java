@@ -1344,7 +1344,7 @@ public final class GuiManager implements Listener {
                 p("points", "Points", Material.REPEATER, "Enter trail points", "24", ParamKind.INTEGER),
                 p("offset", "Offset", Material.SUGAR, "Enter particle offset", "0", ParamKind.DOUBLE),
                 p("particleSpeed", "Particle Speed", Material.FEATHER, "Enter particle speed", "0", ParamKind.DOUBLE)),
-            spec("HITBOX", Material.MAGMA_CREAM, "Selectors", true, true,
+            spec("HITBOX", Material.LIME_STAINED_GLASS, "Selectors", true, true,
                 p("shape", "Shape", Material.MAGMA_CREAM, "Enter SPHERE, CUBE, or CONE", "SPHERE", ParamKind.TEXT),
                 p("size", "Size", Material.SLIME_BALL, "Enter size", "3", ParamKind.DOUBLE),
                 p("at", "At", Material.COMPASS, "Toggle location", "CURRENT", ParamKind.AT_MODE),
@@ -1634,15 +1634,15 @@ public final class GuiManager implements Listener {
 
     private List<String> triggerVariableGroups(TriggerType type) {
         List<String> groups = new ArrayList<>();
-        groups.add("Always: " + variables("SELF", "SELF_UUID", "SELF_WORLD", "SELF_X", "SELF_Y", "SELF_Z", "ITEM_ID", "ITEM_NAME"));
+        groups.add("Always: " + variables("SELF", "SELF_UUID", "SELF_WORLD", "SELF_X", "SELF_Y", "SELF_Z", "SELF_BLOCK_X", "SELF_BLOCK_Y", "SELF_BLOCK_Z", "ITEM_ID", "ITEM_NAME"));
         if (TriggerType.TARGET_TRIGGERS.contains(type)) {
-            groups.add("Target: " + variables("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z"));
+            groups.add("Target: " + variables("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z", "TARGET_BLOCK_X", "TARGET_BLOCK_Y", "TARGET_BLOCK_Z"));
         }
         if (TriggerType.BLOCK_TRIGGERS.contains(type)) {
             groups.add("Block: " + variables("BLOCK", "BLOCK_WORLD", "BLOCK_X", "BLOCK_Y", "BLOCK_Z"));
         }
         if (TriggerType.PROJECTILE_TRIGGERS.contains(type)) {
-            groups.add("Projectile: " + variables("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z"));
+            groups.add("Projectile: " + variables("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z", "PROJECTILE_BLOCK_X", "PROJECTILE_BLOCK_Y", "PROJECTILE_BLOCK_Z"));
         }
         return groups;
     }
@@ -1662,16 +1662,16 @@ public final class GuiManager implements Listener {
         Set<String> allowed = new java.util.HashSet<>();
         allowed.addAll(TriggerExecutor.allowedVariables(null));
         if (context.target()) {
-            allowed.addAll(List.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z"));
+            allowed.addAll(List.of("TARGET", "TARGET_UUID", "ENTITY", "ENTITY_UUID", "TARGET_WORLD", "TARGET_X", "TARGET_Y", "TARGET_Z", "TARGET_BLOCK_X", "TARGET_BLOCK_Y", "TARGET_BLOCK_Z"));
         }
         if (context.block()) {
             allowed.addAll(List.of("BLOCK", "BLOCK_WORLD", "BLOCK_X", "BLOCK_Y", "BLOCK_Z"));
         }
         if (context.projectile()) {
-            allowed.addAll(List.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z"));
+            allowed.addAll(List.of("PROJECTILE", "PROJECTILE_WORLD", "PROJECTILE_X", "PROJECTILE_Y", "PROJECTILE_Z", "PROJECTILE_BLOCK_X", "PROJECTILE_BLOCK_Y", "PROJECTILE_BLOCK_Z"));
         }
         if (context.hit()) {
-            allowed.addAll(List.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z"));
+            allowed.addAll(List.of("HIT_TYPE", "HIT_WORLD", "HIT_X", "HIT_Y", "HIT_Z", "HIT_BLOCK_X", "HIT_BLOCK_Y", "HIT_BLOCK_Z"));
         }
         if (context.ticks()) {
             allowed.add("TICKS");

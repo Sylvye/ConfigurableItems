@@ -26,6 +26,7 @@ final class ActionFormatterTest {
         assertEquals("TIMER duration:20 interval:5", ActionFormatter.normalizeLine("timer duration:20 interval:5"));
         assertEquals("PARTICLE FLAME 1 shape:HEXAGON size:2 rotation:0,90,0 points:12", ActionFormatter.normalizeLine("particle FLAME 1 shape:hexagon size:2 rotation:0,90,0 points:12"));
         assertEquals("DAMAGE 5 type:true target:TARGET", ActionFormatter.normalizeLine("damage 5 type:TRUE target:target"));
+        assertEquals("EXPLODE 2 1 2 3 world:world_nether fire:false", ActionFormatter.normalizeLine("explode 2 1 2 3 world:world_nether fire:FALSE"));
         assertEquals("END_PROJECTILE_TRAIL", ActionFormatter.normalizeLine("end_projectile_trail"));
     }
 

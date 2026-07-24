@@ -1,6 +1,7 @@
-package com.bountysmp.configurableitems.trigger;
+package com.bountysmp.configurableitems.action;
 
 import com.bountysmp.configurableitems.model.TriggerType;
+import com.bountysmp.configurableitems.trigger.TriggerContext;
 import java.lang.reflect.Proxy;
 import java.util.UUID;
 import org.bukkit.Location;
@@ -13,31 +14,29 @@ import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
-final class TriggerContextTest {
+final class ActionExecutionContextTest {
     @Test
-    void targetAndBlockDoNotOverwriteSelfCoordinates() {
+    void nestedLocationsExposeExactAndBlockCoordinates() {
         World world = fakeWorld("world");
-        Player self = fake(Player.class, "self", UUID.randomUUID(), EntityType.PLAYER, new Location(world, 10.9, 64.25, -0.2));
-        Entity target = fake(Entity.class, "zombie", UUID.randomUUID(), EntityType.ZOMBIE, new Location(world, 30.5, 65.75, 40.125));
+        Player self = fake(Player.class, "self", UUID.randomUUID(), EntityType.PLAYER, new Location(world, 0.5, 64, 0.5));
+        Entity target = fake(Entity.class, "zombie", UUID.randomUUID(), EntityType.ZOMBIE, new Location(world, 30.5, 65.75, -0.2));
+        Entity projectile = fake(Entity.class, "arrow", UUID.randomUUID(), EntityType.ARROW, new Location(world, 10.9, 64.25, -0.2));
         Block block = fakeBlock(world, Material.STONE, new Location(world, 50, 66, 60));
+        ActionExecutionContext context = new ActionExecutionContext(new TriggerContext(TriggerType.RIGHT_CLICK, "item", "Item", self));
 
-        TriggerContext context = new TriggerContext(TriggerType.RIGHT_CLICK_BLOCK, "item", "Item", self)
-            .target(target)
-            .block(block);
+        context.target(target);
+        context.projectile(projectile);
+        context.hitEntity(target, new Location(world, 10.9, 64.25, -0.2));
+        context.hitBlock(block, new Location(world, 20.9, 70.25, -2.2));
 
-        assertFalse(context.variables().containsKey("X"));
-        assertFalse(context.variables().containsKey("Y"));
-        assertFalse(context.variables().containsKey("Z"));
-        assertFalse(context.variables().containsKey("WORLD"));
         assertEquals("30.5", context.variables().get("TARGET_X"));
-        assertEquals("30", context.variables().get("TARGET_BLOCK_X"));
+        assertEquals("-1", context.variables().get("TARGET_BLOCK_Z"));
+        assertEquals("10.9", context.variables().get("PROJECTILE_X"));
+        assertEquals("-1", context.variables().get("PROJECTILE_BLOCK_Z"));
+        assertEquals("20.9", context.variables().get("HIT_X"));
+        assertEquals("-3", context.variables().get("HIT_BLOCK_Z"));
         assertEquals("50", context.variables().get("BLOCK_X"));
-        assertEquals("10.9", context.variables().get("SELF_X"));
-        assertEquals("-0.2", context.variables().get("SELF_Z"));
-        assertEquals("10", context.variables().get("SELF_BLOCK_X"));
-        assertEquals("-1", context.variables().get("SELF_BLOCK_Z"));
     }
 
     @SuppressWarnings("unchecked")

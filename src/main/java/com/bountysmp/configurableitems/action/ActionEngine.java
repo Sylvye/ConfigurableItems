@@ -768,13 +768,33 @@ public final class ActionEngine {
             warn(context.triggerContext(), "EXPLODE requires power x y z");
             return;
         }
-        World world = tokens.size() > start + 4 ? Bukkit.getWorld(tokens.get(start + 4)) : context.location().getWorld();
+        String worldName = explodeWorldName(tokens, start);
+        World world = worldName == null ? context.location().getWorld() : Bukkit.getWorld(worldName);
         if (world == null) {
-            warn(context.triggerContext(), "EXPLODE world not found: " + tokens.get(start + 4));
+            warn(context.triggerContext(), "EXPLODE world not found: " + worldName);
             return;
         }
         Location location = new Location(world, doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0), doubleArg(tokens, start + 3, 0.0));
         world.createExplosion(location, (float) doubleArg(tokens, start, 1.0), booleanArg(tokens, "fire", false), booleanArg(tokens, "break-blocks", true), context.self());
+    }
+
+    static String explodeWorldName(List<String> tokens, int start) {
+        return optionalWorldName(tokens, start + 4);
+    }
+
+    static String teleportWorldName(List<String> tokens, int start) {
+        return optionalWorldName(tokens, start + 3);
+    }
+
+    private static String optionalWorldName(List<String> tokens, int worldIndex) {
+        String keyedWorld = keyArg(tokens, "world");
+        if (keyedWorld != null && !keyedWorld.isBlank()) {
+            return keyedWorld;
+        }
+        if (tokens.size() > worldIndex && !tokens.get(worldIndex).contains(":")) {
+            return tokens.get(worldIndex);
+        }
+        return null;
     }
 
     private void heal(ActionExecutionContext context, List<String> tokens) {
@@ -837,9 +857,10 @@ public final class ActionEngine {
             warn(context.triggerContext(), "TELEPORT requires x y z coordinates");
             return;
         }
-        World world = tokens.size() > start + 3 ? Bukkit.getWorld(tokens.get(start + 3)) : context.location().getWorld();
+        String worldName = teleportWorldName(tokens, start);
+        World world = worldName == null ? context.location().getWorld() : Bukkit.getWorld(worldName);
         if (world == null) {
-            warn(context.triggerContext(), "TELEPORT world not found: " + tokens.get(start + 3));
+            warn(context.triggerContext(), "TELEPORT world not found: " + worldName);
             return;
         }
         teleportReceiver(context, receiver, new Location(world, doubleArg(tokens, start, 0.0), doubleArg(tokens, start + 1, 0.0), doubleArg(tokens, start + 2, 0.0)), tokens);

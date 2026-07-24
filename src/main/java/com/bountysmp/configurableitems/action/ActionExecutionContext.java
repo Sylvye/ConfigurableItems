@@ -102,7 +102,7 @@ final class ActionExecutionContext {
         if (block != null) {
             variables.put("BLOCK", block.getType().key().asString());
             variables.put("BLOCK_WORLD", block.getWorld().getName());
-            putLocationVariables("BLOCK_", block.getLocation());
+            putBlockLocationVariables("BLOCK_", block.getLocation());
         }
     }
 
@@ -117,7 +117,7 @@ final class ActionExecutionContext {
         putHitLocationVariables(location == null ? block.getLocation() : location);
         variables.put("BLOCK", block.getType().key().asString());
         variables.put("BLOCK_WORLD", block.getWorld().getName());
-        putLocationVariables("BLOCK_", block.getLocation());
+        putBlockLocationVariables("BLOCK_", block.getLocation());
     }
 
     void putVariable(String key, String value) {
@@ -149,6 +149,13 @@ final class ActionExecutionContext {
     }
 
     private void putLocationVariables(String prefix, Location location) {
+        variables.put(prefix + "X", String.valueOf(location.getX()));
+        variables.put(prefix + "Y", String.valueOf(location.getY()));
+        variables.put(prefix + "Z", String.valueOf(location.getZ()));
+        putBlockLocationVariables(prefix + "BLOCK_", location);
+    }
+
+    private void putBlockLocationVariables(String prefix, Location location) {
         variables.put(prefix + "X", String.valueOf(location.getBlockX()));
         variables.put(prefix + "Y", String.valueOf(location.getBlockY()));
         variables.put(prefix + "Z", String.valueOf(location.getBlockZ()));
