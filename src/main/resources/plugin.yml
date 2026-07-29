@@ -2,7 +2,7 @@ name: ConfigurableItems
 version: ${version}
 main: com.bountysmp.configurableitems.ConfigurableItemsPlugin
 api-version: '1.21'
-authors: [BountySMP]
+authors: [Sylvye]
 description: In-game editor for configurable custom items.
 commands:
   configurableitems:
