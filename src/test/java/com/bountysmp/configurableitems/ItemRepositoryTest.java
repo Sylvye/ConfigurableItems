@@ -50,6 +50,22 @@ final class ItemRepositoryTest {
     }
 
     @Test
+    void roundTripsExternalOwner() throws Exception {
+        ItemRepository repository = new ItemRepository(fakePlugin(tempDir));
+        CustomItemDefinition item = new CustomItemDefinition("managed_item");
+        item.managedBy("DungeonItems");
+        item.extras().attackRangeMax = 6.0f;
+
+        repository.save(item);
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(new File(tempDir, "items/managed_item.yml"));
+
+        assertEquals("DungeonItems", yaml.getString("managed-by"));
+        assertEquals(6.0, yaml.getDouble("extras.attack-range-max"));
+        assertTrue(item.externallyManaged());
+        assertEquals("DungeonItems", item.copy().managedBy());
+    }
+
+    @Test
     void readsOldTriggerStringLists() throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("triggers.RIGHT_CLICK", List.of("SEND_MESSAGE &aReady"));
@@ -80,6 +96,24 @@ final class ItemRepositoryTest {
         assertEquals("DASH 1.5", second.get("command"));
         assertEquals(100, second.get("cooldown-ticks"));
         assertEquals("&cCooling down", second.get("cooldown-message"));
+    }
+
+    @Test
+    void roundTripsTriggerLevelCooldown() throws Exception {
+        ItemRepository repository = new ItemRepository(fakePlugin(tempDir));
+        CustomItemDefinition item = new CustomItemDefinition("trigger_cooldown");
+        item.commands(TriggerType.RIGHT_CLICK).add(new CustomItemDefinition.TriggerCommandDef("DASH 1.5"));
+        item.settings(TriggerType.RIGHT_CLICK).cooldownTicks(300);
+        item.settings(TriggerType.RIGHT_CLICK).cooldownMessage("&cWait {COOLDOWN}s");
+
+        repository.save(item);
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(new File(tempDir, "items/trigger_cooldown.yml"));
+        CustomItemDefinition loaded = new CustomItemDefinition("trigger_cooldown");
+        Method read = ItemRepository.class.getDeclaredMethod("readTriggerSettings", ConfigurationSection.class, CustomItemDefinition.class);
+        read.setAccessible(true);
+        read.invoke(null, yaml.getConfigurationSection("trigger-settings"), loaded);
+        assertEquals(300, loaded.settings(TriggerType.RIGHT_CLICK).cooldownTicks());
+        assertEquals("&cWait {COOLDOWN}s", loaded.settings(TriggerType.RIGHT_CLICK).cooldownMessage());
     }
 
     @Test

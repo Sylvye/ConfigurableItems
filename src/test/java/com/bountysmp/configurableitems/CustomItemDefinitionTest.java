@@ -34,4 +34,18 @@ final class CustomItemDefinitionTest {
         assertEquals(100, command.cooldownTicks());
         assertEquals("&cWait", command.cooldownMessage());
     }
+
+    @Test
+    void copyPreservesIndependentTriggerSettings() {
+        CustomItemDefinition item = new CustomItemDefinition("test_item");
+        item.settings(TriggerType.RIGHT_CLICK).cooldownTicks(200);
+        item.settings(TriggerType.RIGHT_CLICK).cooldownMessage("Wait");
+
+        CustomItemDefinition copy = item.copy();
+        copy.settings(TriggerType.RIGHT_CLICK).cooldownTicks(20);
+
+        assertEquals(200, item.settings(TriggerType.RIGHT_CLICK).cooldownTicks());
+        assertEquals(20, copy.settings(TriggerType.RIGHT_CLICK).cooldownTicks());
+        assertEquals("Wait", copy.settings(TriggerType.RIGHT_CLICK).cooldownMessage());
+    }
 }

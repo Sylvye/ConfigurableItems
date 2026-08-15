@@ -70,6 +70,10 @@ public final class ConfigurableItemsCommand implements CommandExecutor, TabCompl
             sender.sendMessage(Component.text("Unknown item id: " + args[1], NamedTextColor.RED));
             return true;
         }
+        if (item.externallyManaged()) {
+            sender.sendMessage(Component.text(item.id() + " is managed by " + item.managedBy() + "; use that plugin's command instead.", NamedTextColor.RED));
+            return true;
+        }
         Player target;
         int amount;
         if (args.length >= 3) {
@@ -108,7 +112,7 @@ public final class ConfigurableItemsCommand implements CommandExecutor, TabCompl
             return prefix(args[0], List.of("give", "reload"));
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("give")) {
-            return prefix(args[1], repository.all().stream().map(CustomItemDefinition::id).toList());
+            return prefix(args[1], repository.all().stream().filter(item -> !item.externallyManaged()).map(CustomItemDefinition::id).toList());
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("give")) {
             return prefix(args[2], Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());

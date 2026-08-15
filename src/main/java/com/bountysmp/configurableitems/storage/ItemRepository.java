@@ -90,6 +90,7 @@ public final class ItemRepository {
             throw new IllegalArgumentException("Invalid item id " + id);
         }
         CustomItemDefinition item = new CustomItemDefinition(id);
+        item.managedBy(yaml.getString("managed-by"));
         item.material(Material.matchMaterial(yaml.getString("material", "STICK")));
         if (item.material() == null || item.material().isAir()) {
             item.material(Material.STICK);
@@ -109,11 +110,13 @@ public final class ItemRepository {
         readExtras(yaml.getConfigurationSection("extras"), item.extras());
         readRestrictions(yaml.getConfigurationSection("restrictions"), item.restrictions());
         readTriggers(yaml.getConfigurationSection("triggers"), item.triggers());
+        readTriggerSettings(yaml.getConfigurationSection("trigger-settings"), item);
         return item;
     }
 
     private void write(YamlConfiguration yaml, CustomItemDefinition item) {
         yaml.set("id", item.id());
+        yaml.set("managed-by", item.managedBy());
         yaml.set("material", item.material().name());
         yaml.set("custom-name", item.customName());
         yaml.set("lore", item.lore());
@@ -162,6 +165,16 @@ public final class ItemRepository {
                 }
                 triggerSection.set(type.name(), values);
             }
+        });
+
+        ConfigurationSection settingsSection = yaml.createSection("trigger-settings");
+        item.triggerSettings().forEach((type, settings) -> {
+            if (!settings.cooldownEnabled() && settings.cooldownMessage().isBlank()) {
+                return;
+            }
+            ConfigurationSection trigger = settingsSection.createSection(type.name());
+            trigger.set("cooldown-ticks", settings.cooldownTicks());
+            trigger.set("cooldown-message", settings.cooldownMessage());
         });
     }
 
@@ -268,6 +281,7 @@ public final class ItemRepository {
         extras.useRemainder = section.getString("use-remainder");
         extras.useCooldownSeconds = section.contains("use-cooldown-seconds") ? (float) section.getDouble("use-cooldown-seconds") : null;
         extras.itemModel = section.getString("item-model");
+        extras.attackRangeMax = section.contains("attack-range-max") ? (float) section.getDouble("attack-range-max") : null;
     }
 
     private static void writeExtras(ConfigurationSection section, CustomItemDefinition.ExtrasDef extras) {
@@ -281,6 +295,7 @@ public final class ItemRepository {
         section.set("use-remainder", extras.useRemainder);
         section.set("use-cooldown-seconds", extras.useCooldownSeconds);
         section.set("item-model", extras.itemModel);
+        section.set("attack-range-max", extras.attackRangeMax);
     }
 
     private static void readRestrictions(ConfigurationSection section, CustomItemDefinition.RestrictionsDef restrictions) {
@@ -363,6 +378,26 @@ public final class ItemRepository {
                 triggers.put(type, commands);
             } catch (IllegalArgumentException ignored) {
                 // Unknown triggers are ignored for V0.
+            }
+        }
+    }
+
+    private static void readTriggerSettings(ConfigurationSection section, CustomItemDefinition item) {
+        if (section == null) {
+            return;
+        }
+        for (String key : section.getKeys(false)) {
+            try {
+                TriggerType type = TriggerType.valueOf(key.toUpperCase(Locale.ROOT));
+                ConfigurationSection trigger = section.getConfigurationSection(key);
+                if (trigger == null) {
+                    continue;
+                }
+                CustomItemDefinition.TriggerSettings settings = item.settings(type);
+                settings.cooldownTicks(trigger.getInt("cooldown-ticks", 0));
+                settings.cooldownMessage(trigger.getString("cooldown-message", ""));
+            } catch (IllegalArgumentException ignored) {
+                // Forward-compatible: ignore trigger types unknown to this CI build.
             }
         }
     }

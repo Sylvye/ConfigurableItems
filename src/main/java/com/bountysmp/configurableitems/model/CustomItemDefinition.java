@@ -13,6 +13,7 @@ import org.bukkit.inventory.EquipmentSlotGroup;
 
 public final class CustomItemDefinition {
     private String id;
+    private String managedBy;
     private Material material = Material.STICK;
     private String customName = "&bNew Item";
     private final List<String> lore = new ArrayList<>();
@@ -27,6 +28,7 @@ public final class CustomItemDefinition {
     private ExtrasDef extras = new ExtrasDef();
     private RestrictionsDef restrictions = new RestrictionsDef();
     private final Map<TriggerType, List<TriggerCommandDef>> triggers = new EnumMap<>(TriggerType.class);
+    private final Map<TriggerType, TriggerSettings> triggerSettings = new EnumMap<>(TriggerType.class);
 
     public CustomItemDefinition(String id) {
         this.id = id;
@@ -34,6 +36,7 @@ public final class CustomItemDefinition {
 
     public CustomItemDefinition copy() {
         CustomItemDefinition copy = new CustomItemDefinition(id);
+        copy.managedBy = managedBy;
         copy.material = material;
         copy.customName = customName;
         copy.lore.addAll(lore);
@@ -48,6 +51,7 @@ public final class CustomItemDefinition {
         copy.extras = extras.copy();
         copy.restrictions = restrictions.copy();
         triggers.forEach((type, commands) -> copy.triggers.put(type, commands.stream().map(TriggerCommandDef::copy).collect(Collectors.toCollection(ArrayList::new))));
+        triggerSettings.forEach((type, settings) -> copy.triggerSettings.put(type, settings.copy()));
         return copy;
     }
 
@@ -58,6 +62,14 @@ public final class CustomItemDefinition {
     public void id(String id) {
         this.id = id.toLowerCase(Locale.ROOT);
     }
+
+    public String managedBy() { return managedBy; }
+
+    public void managedBy(String managedBy) {
+        this.managedBy = managedBy == null || managedBy.isBlank() ? null : managedBy.trim();
+    }
+
+    public boolean externallyManaged() { return managedBy != null; }
 
     public Material material() {
         return material;
@@ -137,6 +149,46 @@ public final class CustomItemDefinition {
 
     public List<TriggerCommandDef> commands(TriggerType type) {
         return triggers.computeIfAbsent(type, ignored -> new ArrayList<>());
+    }
+
+    public Map<TriggerType, TriggerSettings> triggerSettings() {
+        return triggerSettings;
+    }
+
+    public TriggerSettings settings(TriggerType type) {
+        return triggerSettings.computeIfAbsent(type, ignored -> new TriggerSettings());
+    }
+
+    public static final class TriggerSettings {
+        private int cooldownTicks;
+        private String cooldownMessage = "";
+
+        public int cooldownTicks() {
+            return cooldownTicks;
+        }
+
+        public void cooldownTicks(int cooldownTicks) {
+            this.cooldownTicks = Math.max(0, cooldownTicks);
+        }
+
+        public String cooldownMessage() {
+            return cooldownMessage;
+        }
+
+        public void cooldownMessage(String cooldownMessage) {
+            this.cooldownMessage = cooldownMessage == null ? "" : cooldownMessage;
+        }
+
+        public boolean cooldownEnabled() {
+            return cooldownTicks > 0;
+        }
+
+        public TriggerSettings copy() {
+            TriggerSettings copy = new TriggerSettings();
+            copy.cooldownTicks = cooldownTicks;
+            copy.cooldownMessage = cooldownMessage;
+            return copy;
+        }
     }
 
     public record TriggerCommandDef(String command, int cooldownTicks, String cooldownMessage) {
@@ -250,6 +302,7 @@ public final class CustomItemDefinition {
         public String useRemainder;
         public Float useCooldownSeconds;
         public String itemModel;
+        public Float attackRangeMax;
 
         ExtrasDef copy() {
             ExtrasDef copy = new ExtrasDef();
@@ -263,6 +316,7 @@ public final class CustomItemDefinition {
             copy.useRemainder = useRemainder;
             copy.useCooldownSeconds = useCooldownSeconds;
             copy.itemModel = itemModel;
+            copy.attackRangeMax = attackRangeMax;
             return copy;
         }
     }

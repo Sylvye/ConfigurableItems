@@ -57,8 +57,14 @@ public final class TriggerExecutor {
         if (commands == null || commands.isEmpty()) {
             return;
         }
-        List<String> renderedCommands = new ArrayList<>();
         long now = System.currentTimeMillis();
+        CustomItemDefinition.TriggerSettings triggerSettings = item.settings(context.type());
+        CooldownCheck triggerCooldown = checkTriggerCooldown(context, triggerSettings, now);
+        if (triggerCooldown.active()) {
+            sendCooldownMessage(context, triggerSettings.cooldownMessage(), triggerCooldown.remainingSeconds());
+            return;
+        }
+        List<String> renderedCommands = new ArrayList<>();
         for (int i = 0; i < commands.size(); i++) {
             CustomItemDefinition.TriggerCommandDef command = commands.get(i);
             String raw = command.command();
@@ -224,10 +230,32 @@ public final class TriggerExecutor {
     }
 
     private void sendCooldownMessage(TriggerContext context, CustomItemDefinition.TriggerCommandDef command, long remainingSeconds) {
-        if (command.cooldownMessage().isBlank()) {
+        sendCooldownMessage(context, command.cooldownMessage(), remainingSeconds);
+    }
+
+    private CooldownCheck checkTriggerCooldown(TriggerContext context, CustomItemDefinition.TriggerSettings settings, long now) {
+        if (!settings.cooldownEnabled()) {
+            return CooldownCheck.ready();
+        }
+        CooldownKey key = new CooldownKey(context.self().getUniqueId(), context.itemId(), context.type(), -1);
+        Long until = cooldowns.get(key);
+        if (until != null && until > now) {
+            return new CooldownCheck(true, secondsRemaining(until, now));
+        }
+        if (until != null) {
+            cooldowns.remove(key);
+        }
+        long durationMillis = (long) settings.cooldownTicks() * 50L;
+        long end = Long.MAX_VALUE - now < durationMillis ? Long.MAX_VALUE : now + durationMillis;
+        cooldowns.put(key, end);
+        return CooldownCheck.ready();
+    }
+
+    private void sendCooldownMessage(TriggerContext context, String rawMessage, long remainingSeconds) {
+        if (rawMessage.isBlank()) {
             return;
         }
-        String message = command.cooldownMessage().replace("{COOLDOWN}", String.valueOf(remainingSeconds));
+        String message = rawMessage.replace("{COOLDOWN}", String.valueOf(remainingSeconds));
         PlaceholderResolver.Result rendered = render(message, context);
         context.self().sendMessage(TextUtil.legacy(rendered.ok() ? rendered.output() : message));
     }

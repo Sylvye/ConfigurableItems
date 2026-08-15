@@ -9,6 +9,7 @@ import com.bountysmp.configurableitems.action.TimerOptions;
 import com.bountysmp.configurableitems.action.ProjectileTrailOptions;
 import com.bountysmp.configurableitems.action.TargetKind;
 import com.bountysmp.configurableitems.action.VeinmineOptions;
+import com.bountysmp.configurableitems.api.EditorSection;
 import com.bountysmp.configurableitems.item.ItemFactory;
 import com.bountysmp.configurableitems.model.CustomItemDefinition;
 import com.bountysmp.configurableitems.model.TriggerType;
@@ -42,6 +43,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -56,6 +58,11 @@ public final class GuiManager implements Listener {
     private final ItemFactory itemFactory;
     private final InputManager inputManager;
     private final Map<UUID, CustomItemDefinition> drafts = new HashMap<>();
+    private final Map<UUID, ExternalEdit> externalEdits = new HashMap<>();
+    private final Map<UUID, FocusedEdit> focusedEdits = new HashMap<>();
+    private static final Set<String> COMMON_RPG_ATTRIBUTES = Set.of(
+        "minecraft:attack_damage", "minecraft:attack_speed", "minecraft:entity_interaction_range",
+        "minecraft:attack_knockback", "minecraft:armor", "minecraft:armor_toughness", "minecraft:knockback_resistance");
 
     public GuiManager(Plugin plugin, ItemRepository repository, ItemFactory itemFactory, InputManager inputManager) {
         this.plugin = plugin;
@@ -71,7 +78,7 @@ public final class GuiManager implements Listener {
         button(menu, 4, Material.NETHER_STAR, NamedTextColor.AQUA, "ConfigurableItems", "Admin item editor");
         button(menu, 49, Material.LIME_DYE, NamedTextColor.GREEN, "Create Item", "Add a new YAML-backed item", e -> promptCreate(player));
 
-        List<CustomItemDefinition> items = new ArrayList<>(repository.all());
+        List<CustomItemDefinition> items = repository.all().stream().filter(item -> !item.externallyManaged()).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         int start = Math.max(0, page * 28);
         int slot = 10;
         for (int i = start; i < items.size() && slot < 44; i++) {
@@ -95,14 +102,21 @@ public final class GuiManager implements Listener {
     }
 
     public void openEditor(Player player, CustomItemDefinition item) {
+        if (item.externallyManaged() && !focusedEdits.containsKey(player.getUniqueId()) && !externalEdits.containsKey(player.getUniqueId())) {
+            error(player, item.id() + " is managed by " + item.managedBy() + ".");
+            openMain(player, 0);
+            return;
+        }
         drafts.put(player.getUniqueId(), item);
         Menu menu = new Menu("CI: " + item.id());
         Inventory inv = menu.inventory();
         frame(inv);
         inv.setItem(4, itemFactory.create(item));
         button(menu, 10, Material.CYAN_DYE, NamedTextColor.AQUA, "Material", item.material().name(), e -> openMaterialSelector(player, item, 0, ""));
-        button(menu, 11, Material.NAME_TAG, NamedTextColor.AQUA, "Custom Name", item.customName(), e -> promptName(player, item));
-        button(menu, 12, Material.WRITABLE_BOOK, NamedTextColor.AQUA, "Lore", item.lore().size() + " lines", e -> promptLore(player, item));
+        ExternalEdit external = externalEdits.get(player.getUniqueId());
+        boolean locked = external != null && external.lockPresentation();
+        button(menu, 11, Material.NAME_TAG, locked ? NamedTextColor.DARK_GRAY : NamedTextColor.AQUA, "Custom Name", locked ? "Managed by integrating plugin" : item.customName(), e -> { if (!locked) promptName(player, item); });
+        button(menu, 12, Material.WRITABLE_BOOK, locked ? NamedTextColor.DARK_GRAY : NamedTextColor.AQUA, "Lore", locked ? "Managed by integrating plugin" : item.lore().size() + " lines", e -> { if (!locked) promptLore(player, item); });
         button(menu, 13, Material.ENCHANTED_BOOK, NamedTextColor.LIGHT_PURPLE, "Enchantments", item.enchantments().size() + " entries", e -> openEnchantments(player, item));
         button(menu, 14, Material.IRON_CHESTPLATE, NamedTextColor.LIGHT_PURPLE, "Attributes", item.attributes().size() + " entries", e -> openAttributes(player, item));
         button(menu, 15, Material.COOKED_BEEF, NamedTextColor.LIGHT_PURPLE, "Food", status(item.food().enabled), e -> openFood(player, item));
@@ -111,19 +125,66 @@ public final class GuiManager implements Listener {
         button(menu, 20, Material.CHEST, NamedTextColor.LIGHT_PURPLE, "Extras", "Durability, stack, model, cooldown", e -> openExtras(player, item));
         button(menu, 21, Material.BARRIER, NamedTextColor.YELLOW, "Restrictions", restrictionCount(item) + " enabled", e -> openRestrictions(player, item));
         button(menu, 22, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Triggers", triggerCount(item) + " commands", e -> openTriggers(player, item));
-        button(menu, 45, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openMain(player, 0));
-        button(menu, 46, Material.RED_DYE, NamedTextColor.RED, "Delete YAML", "Deletes saved YAML", e -> {
-            repository.delete(item.id());
-            drafts.remove(player.getUniqueId());
-            openMain(player, 0);
+        button(menu, 45, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> {
+            if (external == null) openMain(player, 0); else cancelExternal(player, external);
         });
+        if (external == null) {
+            button(menu, 46, Material.RED_DYE, NamedTextColor.RED, "Delete YAML", "Deletes saved YAML", e -> {
+                repository.delete(item.id());
+                drafts.remove(player.getUniqueId());
+                openMain(player, 0);
+            });
+        }
         button(menu, 49, Material.PLAYER_HEAD, NamedTextColor.GREEN, "Give To Self", "", e -> player.getInventory().addItem(itemFactory.create(item)));
-        saveAll(menu, player, item);
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
+    public void openDraftEditor(Player player, CustomItemDefinition item, boolean lockPresentation,
+                                Consumer<CustomItemDefinition> onSave, Runnable onCancel) {
+        externalEdits.put(player.getUniqueId(), new ExternalEdit(lockPresentation, onSave, onCancel));
+        openEditor(player, item);
+    }
+
+    public void openSectionEditor(Player player, CustomItemDefinition item, EditorSection section,
+                                  Consumer<CustomItemDefinition> onChange, Runnable onBack) {
+        focusedEdits.put(player.getUniqueId(), new FocusedEdit(item, onChange, onBack));
+        switch (section) {
+            case ENCHANTMENTS -> openEnchantments(player, item);
+            case ATTRIBUTES -> openAttributes(player, item);
+            case FOOD -> openFood(player, item);
+            case TOOL -> openTool(player, item);
+            case EQUIP -> openEquip(player, item);
+            case EXTRAS -> openExtras(player, item);
+            case RESTRICTIONS -> openRestrictions(player, item);
+        }
+    }
+
+    public void openTriggerActionEditor(Player player, CustomItemDefinition item, TriggerType trigger,
+                                        Consumer<CustomItemDefinition> onChange, Runnable onBack) {
+        focusedEdits.put(player.getUniqueId(), new FocusedEdit(item, onChange, onBack));
+        openTriggerCommands(player, item, trigger);
+    }
+
+    private void finishFocused(Player player) {
+        FocusedEdit edit = focusedEdits.remove(player.getUniqueId());
+        if (edit != null) edit.onBack().run();
+    }
+
+    private void notifyFocused(Player player) {
+        FocusedEdit edit = focusedEdits.get(player.getUniqueId());
+        if (edit != null) edit.onChange().accept(edit.definition());
+    }
+
+    private void cancelExternal(Player player, ExternalEdit edit) {
+        externalEdits.remove(player.getUniqueId());
+        drafts.remove(player.getUniqueId());
+        player.closeInventory();
+        edit.onCancel().run();
+    }
+
     private void openEnchantments(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Enchants");
+        Menu menu = new Menu(focusedTitle(player, "Enchantments", "CI Enchants"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Enchantment", "Choose from registry", e -> openEnchantmentSelector(player, item, 0, ""));
@@ -148,7 +209,7 @@ public final class GuiManager implements Listener {
     }
 
     private void openAttributes(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Attributes");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Attributes", "CI Attributes"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Attribute", "Choose from registry", e -> openAttributeSelector(player, item, 0, ""));
@@ -158,6 +219,7 @@ public final class GuiManager implements Listener {
         });
         int slot = 19;
         for (CustomItemDefinition.AttributeDef attribute : item.attributes()) {
+            if (focusedEdits.containsKey(player.getUniqueId()) && COMMON_RPG_ATTRIBUTES.contains(attribute.key())) continue;
             int index = item.attributes().indexOf(attribute);
             button(menu, slot++, Material.IRON_SWORD, NamedTextColor.RED, attribute.key(), attribute.operation() + " " + attribute.value() + " " + attribute.slot(), e -> {
                 item.attributes().remove(index);
@@ -169,7 +231,7 @@ public final class GuiManager implements Listener {
     }
 
     private void openFood(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Food");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Consumable", "CI Food"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.COOKED_BEEF, item.food().enabled ? NamedTextColor.GREEN : NamedTextColor.RED, "Enabled", status(item.food().enabled), e -> toggleFood(player, item));
@@ -200,7 +262,7 @@ public final class GuiManager implements Listener {
     }
 
     private void openTool(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Tool");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Tool", "CI Tool"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.IRON_PICKAXE, item.tool().enabled ? NamedTextColor.GREEN : NamedTextColor.RED, "Enabled", status(item.tool().enabled), e -> {
@@ -216,7 +278,7 @@ public final class GuiManager implements Listener {
     }
 
     private void openEquip(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Equip");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Equipment", "CI Equip"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.IRON_CHESTPLATE, item.equip().enabled ? NamedTextColor.GREEN : NamedTextColor.RED, "Enabled", status(item.equip().enabled), e -> {
@@ -243,17 +305,19 @@ public final class GuiManager implements Listener {
     }
 
     private void openExtras(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Extras");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Item Data", "CI Extras"));
         Inventory inv = menu.inventory();
         frame(inv);
-        button(menu, 10, Material.ANVIL, item.extras().unbreakable ? NamedTextColor.GREEN : NamedTextColor.RED, "Unbreakable", status(item.extras().unbreakable), e -> {
-            item.extras().unbreakable = !item.extras().unbreakable;
-            openExtras(player, item);
-        });
-        button(menu, 11, Material.BOOK, item.extras().showUnbreakable ? NamedTextColor.GREEN : NamedTextColor.RED, "Unbreakable Tooltip", shown(item.extras().showUnbreakable), e -> {
-            item.extras().showUnbreakable = !item.extras().showUnbreakable;
-            openExtras(player, item);
-        });
+        if (!focusedEdits.containsKey(player.getUniqueId())) {
+            button(menu, 10, Material.ANVIL, item.extras().unbreakable ? NamedTextColor.GREEN : NamedTextColor.RED, "Unbreakable", status(item.extras().unbreakable), e -> {
+                item.extras().unbreakable = !item.extras().unbreakable;
+                openExtras(player, item);
+            });
+            button(menu, 11, Material.BOOK, item.extras().showUnbreakable ? NamedTextColor.GREEN : NamedTextColor.RED, "Unbreakable Tooltip", shown(item.extras().showUnbreakable), e -> {
+                item.extras().showUnbreakable = !item.extras().showUnbreakable;
+                openExtras(player, item);
+            });
+        }
         numberButton(menu, player, item, 12, Material.DIAMOND_PICKAXE, "Max Durability", item.extras().maxDurability, raw -> item.extras().maxDurability = raw);
         numberButton(menu, player, item, 13, Material.BUNDLE, "Max Stack Size", item.extras().maxStackSize, raw -> item.extras().maxStackSize = raw);
         button(menu, 14, Material.BLAZE_POWDER, item.extras().fireResistant ? NamedTextColor.GREEN : NamedTextColor.RED, "Fire Resistant", status(item.extras().fireResistant), e -> {
@@ -277,12 +341,16 @@ public final class GuiManager implements Listener {
             openExtras(player, item);
         }, () -> openExtras(player, item)));
         button(menu, 23, Material.ITEM_FRAME, NamedTextColor.AQUA, "Item Model", String.valueOf(item.extras().itemModel), e -> openItemModelSelector(player, item, 0, ""));
+        if (!focusedEdits.containsKey(player.getUniqueId())) button(menu, 24, Material.TRIDENT, NamedTextColor.AQUA, "Attack Range Max", String.valueOf(item.extras().attackRangeMax), e -> input(player, "Enter maximum attack range, or clear", raw -> {
+            item.extras().attackRangeMax = raw.equalsIgnoreCase("clear") ? null : Math.max(0, Math.min(64, parseFloat(raw, item.extras().attackRangeMax == null ? 3f : item.extras().attackRangeMax)));
+            openExtras(player, item);
+        }, () -> openExtras(player, item)));
         back(menu, player, item);
         player.openInventory(inv);
     }
 
     private void openRestrictions(Player player, CustomItemDefinition item) {
-        Menu menu = new Menu("CI Restrictions");
+        Menu menu = new Menu(focusedTitle(player, "Advanced Restrictions", "CI Restrictions"));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.DROPPER, restrictionColor(item.restrictions().cancelDrop), "Cancel Item Drop", status(item.restrictions().cancelDrop), e -> {
@@ -330,7 +398,7 @@ public final class GuiManager implements Listener {
     }
 
     private void openTriggerCommands(Player player, CustomItemDefinition item, TriggerType type) {
-        Menu menu = new Menu("CI " + type.name());
+        Menu menu = new Menu(focusedTitle(player, "Ability Actions", "CI " + type.name()));
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Command", "Console command without slash", e -> input(player, rawCommandPrompt(type, "Enter console command"), raw -> {
@@ -340,6 +408,21 @@ public final class GuiManager implements Listener {
         }, () -> openTriggerCommands(player, item, type)));
         button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", triggerVariableLore(type));
         button(menu, 12, Material.COMMAND_BLOCK, NamedTextColor.YELLOW, "Add Action", "Choose a CI action", e -> openActionSelector(player, item, type, -1, 0, ""));
+        CustomItemDefinition.TriggerSettings triggerSettings = item.settings(type);
+        if (!focusedEdits.containsKey(player.getUniqueId())) button(menu, 13, Material.CLOCK, triggerSettings.cooldownEnabled() ? NamedTextColor.GOLD : NamedTextColor.GRAY,
+            "Trigger Cooldown", triggerSettings.cooldownEnabled() ? triggerSettings.cooldownTicks() + " ticks" : "Disabled", e ->
+                input(player, "Enter trigger cooldown: TICKS [optional message], or clear", raw -> {
+                    String trimmed = raw.trim();
+                    if (trimmed.equalsIgnoreCase("clear") || trimmed.equals("0")) {
+                        triggerSettings.cooldownTicks(0);
+                        triggerSettings.cooldownMessage("");
+                    } else {
+                        String[] parts = trimmed.split("\\s+", 2);
+                        triggerSettings.cooldownTicks(parseInt(parts[0], 0));
+                        triggerSettings.cooldownMessage(parts.length > 1 ? parts[1] : "");
+                    }
+                    openTriggerCommands(player, item, type);
+                }, () -> openTriggerCommands(player, item, type)));
         int slot = 19;
         List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
         for (ActionCommandRows.Row row : ActionCommandRows.rows(commandLines(commands))) {
@@ -351,20 +434,26 @@ public final class GuiManager implements Listener {
             Material icon = row.block() ? Material.COMMAND_BLOCK : Material.REDSTONE;
             NamedTextColor color = command.cooldownEnabled() ? NamedTextColor.GOLD : row.block() ? NamedTextColor.YELLOW : NamedTextColor.RED;
             button(menu, slot++, icon, color, row.summary(), cooldownLore(command, row), e -> {
-                if (e.isRightClick()) {
-                    promptCooldown(player, item, type, index);
-                    return;
+                if (e.getClick() == org.bukkit.event.inventory.ClickType.DROP) {
+                    removeCommandRange(commands, index); openTriggerCommands(player, item, type); return;
+                }
+                if (e.getClick() == org.bukkit.event.inventory.ClickType.CONTROL_DROP) {
+                    duplicateCommandRange(commands, index); openTriggerCommands(player, item, type); return;
                 }
                 if (e.isShiftClick()) {
-                    removeCommandRange(commands, index);
-                    openTriggerCommands(player, item, type);
+                    moveCommandRange(commands, index, e.isRightClick() ? 1 : -1); openTriggerCommands(player, item, type); return;
+                }
+                if (e.isRightClick()) {
+                    promptCooldown(player, item, type, index);
                     return;
                 }
                 openExistingActionEditor(player, item, type, index);
             });
         }
-        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openTriggers(player, item));
-        saveAll(menu, player, item);
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> {
+            if (focusedEdits.containsKey(player.getUniqueId())) finishFocused(player); else openTriggers(player, item);
+        });
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -403,6 +492,26 @@ public final class GuiManager implements Listener {
         }
     }
 
+    private void duplicateCommandRange(List<CustomItemDefinition.TriggerCommandDef> commands, int index) {
+        int end = blockEnd(commands, index);
+        List<CustomItemDefinition.TriggerCommandDef> copy = commands.subList(index, end + 1).stream().map(CustomItemDefinition.TriggerCommandDef::copy).toList();
+        commands.addAll(end + 1, copy);
+    }
+
+    private void moveCommandRange(List<CustomItemDefinition.TriggerCommandDef> commands, int index, int direction) {
+        List<ActionCommandRows.Row> rows = ActionCommandRows.rows(commandLines(commands));
+        int position = -1;
+        for (int i = 0; i < rows.size(); i++) if (rows.get(i).startIndex() == index) { position = i; break; }
+        int destination = position + direction;
+        if (position < 0 || destination < 0 || destination >= rows.size()) return;
+        int end = blockEnd(commands, index);
+        List<CustomItemDefinition.TriggerCommandDef> moving = new ArrayList<>(commands.subList(index, end + 1));
+        commands.subList(index, end + 1).clear();
+        int nextSize = rows.get(destination).endIndex() - rows.get(destination).startIndex() + 1;
+        int insert = direction < 0 ? rows.get(destination).startIndex() : index + nextSize;
+        commands.addAll(insert, moving);
+    }
+
     private void openActionSelector(Player player, CustomItemDefinition item, TriggerType type, int editIndex, int page, String filter) {
         openSelector(player, item, "Select Action", actionCatalogOptions(type), page, filter,
             option -> {
@@ -417,8 +526,14 @@ public final class GuiManager implements Listener {
             },
             () -> openTriggerCommands(player, item, type),
             null,
-            () -> input(player, rawCommandPrompt(type, "Enter custom CI action"), raw -> {
-                String normalized = ActionFormatter.normalizeLine(raw);
+            () -> input(player, "Enter one console command without a leading slash. Trigger: " + type.name(), raw -> {
+                String command = raw.trim().startsWith("/") ? raw.trim().substring(1) : raw.trim();
+                if (command.isBlank()) {
+                    error(player, "Command cannot be blank.");
+                    openActionSelector(player, item, type, editIndex, page, filter);
+                    return;
+                }
+                String normalized = ActionFormatter.normalizeLine(command);
                 if (editIndex >= 0) {
                     List<CustomItemDefinition.TriggerCommandDef> commands = item.commands(type);
                     replaceCommandRange(commands, editIndex, List.of(normalized));
@@ -450,7 +565,7 @@ public final class GuiManager implements Listener {
             button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", draft.body().isEmpty() ? "Empty" : String.join(" <+> ", draft.body()), e -> openActionBodyEditor(player, item, type, editIndex, draft, cancel));
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openTriggerCommands(player, item, type));
-        saveAll(menu, player, item);
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -547,7 +662,7 @@ public final class GuiManager implements Listener {
             });
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> backToAction.run());
-        saveAll(menu, player, item);
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -616,7 +731,7 @@ public final class GuiManager implements Listener {
             button(menu, 31, Material.WRITABLE_BOOK, NamedTextColor.YELLOW, "Nested Actions", nested.body().isEmpty() ? "Empty" : String.join(" <+> ", nested.body()), e -> openActionBodyEditor(player, item, type, editIndex, nested, backToNested, backToNested, nestedChanged));
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openActionBodyEditor(player, item, type, editIndex, parent, cancel, parentBackToAction, parentChanged));
-        saveAll(menu, player, item);
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
         player.openInventory(inv);
     }
 
@@ -1090,9 +1205,9 @@ public final class GuiManager implements Listener {
     private String cooldownLore(CustomItemDefinition.TriggerCommandDef command, ActionCommandRows.Row row) {
         String prefix = row.block() ? row.nestedLineCount() + " nested lines | " : "";
         if (!command.cooldownEnabled()) {
-            return prefix + "Left edit | Right cooldown: Disabled | Shift remove";
+            return prefix + "Left edit | Right cooldown: Disabled | Shift-left/right move | Q remove | Ctrl-Q duplicate";
         }
-        return prefix + "Left edit | Right cooldown: " + command.cooldownTicks() + " ticks | Shift remove";
+        return prefix + "Left edit | Right cooldown: " + command.cooldownTicks() + " ticks | Shift-left/right move | Q remove | Ctrl-Q duplicate";
     }
 
     private void openMaterialSelector(Player player, CustomItemDefinition item, int page, String filter) {
@@ -1120,7 +1235,9 @@ public final class GuiManager implements Listener {
     }
 
     private void openAttributeSelector(Player player, CustomItemDefinition item, int page, String filter) {
-        openSelector(player, item, "Select Attribute", attributeOptions(), page, filter,
+        List<SelectorOption> options = attributeOptions();
+        if (focusedEdits.containsKey(player.getUniqueId())) options = options.stream().filter(option -> !COMMON_RPG_ATTRIBUTES.contains(option.key())).toList();
+        openSelector(player, item, "Select Attribute", options, page, filter,
             option -> openAttributeOperationSelector(player, item, option.key()),
             () -> openAttributes(player, item),
             null,
@@ -1282,7 +1399,10 @@ public final class GuiManager implements Listener {
             button(menu, 47, Material.BARRIER, NamedTextColor.RED, "Clear", "", e -> clear.run());
         }
         if (custom != null) {
-            button(menu, 48, Material.NAME_TAG, NamedTextColor.YELLOW, "Custom Key", "", e -> custom.run());
+            boolean actionSelector = title.equals("Select Action");
+            button(menu, 48, actionSelector ? Material.COMMAND_BLOCK : Material.NAME_TAG, NamedTextColor.YELLOW,
+                actionSelector ? "Console Command" : "Custom Key",
+                actionSelector ? "Run one command as the server console" : "", e -> custom.run());
         }
         button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> back.run());
         if (start + pageSize < filtered.size()) {
@@ -1496,8 +1616,15 @@ public final class GuiManager implements Listener {
             Consumer<InventoryClickEvent> action = menu.actions.get(event.getRawSlot());
             if (action != null) {
                 action.accept(event);
+                notifyFocused((Player) event.getWhoClicked());
             }
         }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        drafts.remove(id); externalEdits.remove(id); focusedEdits.remove(id);
     }
 
     private void promptCreate(Player player) {
@@ -1553,6 +1680,13 @@ public final class GuiManager implements Listener {
                 return;
             }
         }
+        ExternalEdit external = externalEdits.remove(player.getUniqueId());
+        if (external != null) {
+            drafts.remove(player.getUniqueId());
+            player.closeInventory();
+            external.onSave().accept(item.copy());
+            return;
+        }
         try {
             repository.save(item);
             player.sendMessage(Component.text("Saved " + item.id(), NamedTextColor.GREEN));
@@ -1587,12 +1721,17 @@ public final class GuiManager implements Listener {
     }
 
     private void input(Player player, String prompt, Consumer<String> action, Runnable cancel) {
-        inputManager.prompt(player, prompt, action, cancel);
+        inputManager.prompt(player, prompt, value -> {
+            action.accept(value);
+            notifyFocused(player);
+        }, cancel);
     }
 
     private void back(Menu menu, Player player, CustomItemDefinition item) {
-        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> openEditor(player, item));
-        saveAll(menu, player, item);
+        button(menu, 49, Material.ARROW, NamedTextColor.GRAY, "Back", "", e -> {
+            if (focusedEdits.containsKey(player.getUniqueId())) finishFocused(player); else openEditor(player, item);
+        });
+        if (!focusedEdits.containsKey(player.getUniqueId())) saveAll(menu, player, item);
     }
 
     private void saveAll(Menu menu, Player player, CustomItemDefinition item) {
@@ -1780,6 +1919,10 @@ public final class GuiManager implements Listener {
 
     private void error(Player player, String message) {
         player.sendMessage(Component.text(message, NamedTextColor.RED));
+    }
+
+    private String focusedTitle(Player player, String focused, String normal) {
+        return focusedEdits.containsKey(player.getUniqueId()) ? "DI: " + focused : normal;
     }
 
     private int triggerCount(CustomItemDefinition item) {
@@ -2172,6 +2315,12 @@ public final class GuiManager implements Listener {
         void action(int slot, Consumer<InventoryClickEvent> action) {
             actions.put(slot, action);
         }
+    }
+
+    private record ExternalEdit(boolean lockPresentation, Consumer<CustomItemDefinition> onSave, Runnable onCancel) {
+    }
+
+    private record FocusedEdit(CustomItemDefinition definition, Consumer<CustomItemDefinition> onChange, Runnable onBack) {
     }
 
     private record SelectorOption(String key, Material icon, String name, String lore) {

@@ -6,6 +6,7 @@ import com.bountysmp.configurableitems.util.ValidationUtil;
 import io.papermc.paper.datacomponent.DataComponentType;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.Consumable;
+import io.papermc.paper.datacomponent.item.AttackRange;
 import io.papermc.paper.datacomponent.item.DeathProtection;
 import io.papermc.paper.datacomponent.item.Repairable;
 import io.papermc.paper.datacomponent.item.TooltipDisplay;
@@ -67,6 +68,11 @@ public final class ItemFactory {
             }
             meta.setEnchantmentGlintOverride(definition.glintOverride());
 
+            // Supplying an ATTRIBUTE_MODIFIERS component replaces the material defaults.
+            // Seed those defaults before applying configured modifiers so CI attributes are additive.
+            if (!definition.attributes().isEmpty() && (meta.getAttributeModifiers() == null || meta.getAttributeModifiers().isEmpty())) {
+                definition.material().asItemType().getDefaultAttributeModifiers().forEach(meta::addAttributeModifier);
+            }
             for (CustomItemDefinition.AttributeDef entry : definition.attributes()) {
                 Optional<ValidationUtil.AttributeResult> result = ValidationUtil.attribute(entry.key());
                 if (result.isPresent()) {
@@ -133,6 +139,12 @@ public final class ItemFactory {
                     stack.setData(DataComponentTypes.REPAIRABLE, Repairable.repairable(RegistrySet.keySetFromValues(RegistryKey.ITEM, List.of(material.asItemType()))));
                 }
             });
+        }
+        if (definition.extras().attackRangeMax != null) {
+            AttackRange base = definition.material().asItemType().getDefaultData(DataComponentTypes.ATTACK_RANGE);
+            AttackRange.Builder builder = AttackRange.attackRange().maxReach(Math.max(0, Math.min(64, definition.extras().attackRangeMax)));
+            if (base != null) builder.minReach(base.minReach()).minCreativeReach(base.minCreativeReach()).maxCreativeReach(base.maxCreativeReach()).hitboxMargin(base.hitboxMargin()).mobFactor(base.mobFactor());
+            stack.setData(DataComponentTypes.ATTACK_RANGE, builder.build());
         }
         applyConsumable(stack, definition);
         applyDeathProtection(stack, definition);
