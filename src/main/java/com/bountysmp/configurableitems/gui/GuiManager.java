@@ -402,8 +402,12 @@ public final class GuiManager implements Listener {
         Inventory inv = menu.inventory();
         frame(inv);
         button(menu, 10, Material.LIME_DYE, NamedTextColor.GREEN, "Add Command", "Console command without slash", e -> input(player, rawCommandPrompt(type, "Enter console command"), raw -> {
-            String command = ActionFormatter.normalizeLine(raw.startsWith("/") ? raw.substring(1) : raw);
-            item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(command));
+            String command = normalizeConsoleCommand(raw);
+            if (command.isBlank()) {
+                error(player, "Command cannot be blank.");
+            } else {
+                item.commands(type).add(new CustomItemDefinition.TriggerCommandDef(command));
+            }
             openTriggerCommands(player, item, type);
         }, () -> openTriggerCommands(player, item, type)));
         button(menu, 11, Material.PAPER, NamedTextColor.AQUA, "Variables", triggerVariableLore(type));
@@ -527,7 +531,7 @@ public final class GuiManager implements Listener {
             () -> openTriggerCommands(player, item, type),
             null,
             () -> input(player, "Enter one console command without a leading slash. Trigger: " + type.name(), raw -> {
-                String command = raw.trim().startsWith("/") ? raw.trim().substring(1) : raw.trim();
+                String command = normalizeConsoleCommand(raw);
                 if (command.isBlank()) {
                     error(player, "Command cannot be blank.");
                     openActionSelector(player, item, type, editIndex, page, filter);
@@ -1762,6 +1766,11 @@ public final class GuiManager implements Listener {
 
     private String rawCommandPrompt(GuiContext context, String action) {
         return action + ". Variables: " + sortedVariables(context);
+    }
+
+    private static String normalizeConsoleCommand(String raw) {
+        String command = raw == null ? "" : raw.trim();
+        return ActionFormatter.normalizeLine(command.startsWith("/") ? command.substring(1).trim() : command);
     }
 
     private List<String> triggerVariableLore(TriggerType type) {

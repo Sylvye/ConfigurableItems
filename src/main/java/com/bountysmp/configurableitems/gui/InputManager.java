@@ -12,6 +12,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.plugin.Plugin;
 
 public final class InputManager implements Listener {
@@ -36,10 +37,24 @@ public final class InputManager implements Listener {
             return;
         }
         event.setCancelled(true);
+        dispatch(event.getPlayer(), input, event.getMessage());
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onCommand(PlayerCommandPreprocessEvent event) {
+        PendingInput input = inputs.remove(event.getPlayer().getUniqueId());
+        if (input == null) {
+            return;
+        }
+        event.setCancelled(true);
         String message = event.getMessage();
+        dispatch(event.getPlayer(), input, message.startsWith("/") ? message.substring(1) : message);
+    }
+
+    private void dispatch(Player player, PendingInput input, String message) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (message.equalsIgnoreCase("cancel") || message.equalsIgnoreCase("abort")) {
-                event.getPlayer().sendMessage(Component.text("Input cancelled.", NamedTextColor.RED));
+                player.sendMessage(Component.text("Input cancelled.", NamedTextColor.RED));
                 input.cancelHandler.run();
                 return;
             }
